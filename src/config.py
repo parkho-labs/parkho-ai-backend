@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     firebase_project_id: str = Field(default="parkhoai-864b2", description="Firebase project ID")
     firebase_web_client_id: str = Field(default="846780462763-41qfms7hjen9er8ak9j4n5cevc8pkoti.apps.googleusercontent.com", description="Firebase web client ID")
     
-    max_video_length_minutes: int = Field(default=60, description="Maximum video length in minutes")
+    max_video_length_minutes: int = Field(default=30, description="Maximum video length in minutes")
     max_concurrent_jobs: int = Field(default=5, description="Maximum concurrent processing jobs")
     job_timeout_minutes: int = Field(default=10, description="Job timeout in minutes")
     temp_files_dir: str = Field(default="/tmp/ai_video_tutor", description="Temporary files directory")

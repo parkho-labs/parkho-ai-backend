@@ -37,44 +37,26 @@ class InputType(str, Enum):
     WEB_URL = "web_url"
 
 
+class ContentInput(BaseModel):
+    content_type: InputType
+    id: str
+
+
 class ContentProcessingRequest(BaseModel):
-    input_url: Optional[str] = None
-    file_ids: List[str] = Field(default=[])
+    input_config: List[ContentInput] = Field(min_items=1)
     question_types: List[QuestionType] = Field(default=[QuestionType.MULTIPLE_CHOICE])
     difficulty_level: DifficultyLevel = Field(default=DifficultyLevel.INTERMEDIATE)
     num_questions: int = Field(default=5, ge=1, le=50)
     generate_summary: bool = Field(default=True)
     llm_provider: LLMProvider = Field(default=LLMProvider.OPENAI)
 
-    @validator('file_ids')
-    def validate_single_file_limit(cls, v):
-        if len(v) > 1:
-            raise ValueError('Currently only single file processing is supported. Please provide exactly one file_id.')
-        return v
-
-    @validator('file_ids', 'input_url')
-    def validate_single_content_source(cls, v, values):
-        # Ensure only one content source is provided
-        input_url = values.get('input_url')
-        file_ids = v if isinstance(v, list) else values.get('file_ids', [])
-
-        content_sources = sum([
-            1 if input_url else 0,
-            1 if file_ids else 0
-        ])
-
-        if content_sources == 0:
-            raise ValueError('Please provide either input_url or file_ids.')
-        elif content_sources > 1:
-            raise ValueError('Please provide either input_url OR file_ids, not both.')
-
-        return v
-
     class Config:
         json_schema_extra = {
             "example": {
-                "input_url": "https://youtube.com/watch?v=abc123",
-                "file_ids": ["file_id_1"],
+                "input_config": [
+                    {"content_type": "youtube", "id": "https://youtu.be/abc123"},
+                    {"content_type": "pdf", "id": "file-hash-456"}
+                ],
                 "question_types": ["multiple_choice", "short_answer"],
                 "difficulty_level": "intermediate",
                 "num_questions": 5,

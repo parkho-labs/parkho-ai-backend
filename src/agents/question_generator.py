@@ -1,5 +1,6 @@
 import json
 from typing import Dict, Any, List
+import structlog
 
 import openai
 
@@ -10,6 +11,7 @@ from ..repositories.quiz_repository import QuizRepository
 from ..core.database import SessionLocal
 
 settings = get_settings()
+logger = structlog.get_logger(__name__)
 
 
 class QuestionGeneratorAgent(ContentTutorAgent):
@@ -31,6 +33,10 @@ class QuestionGeneratorAgent(ContentTutorAgent):
 
         if not transcript:
             raise ValueError("No transcript available for question generation")
+
+        logger.info(f"QuestionGenerator received data keys: {list(data.keys())}")
+        logger.info(f"Transcript length: {len(transcript) if transcript else 0}")
+        logger.info(f"Question types: {question_types}, Num questions: {num_questions}")
 
         try:
             await self.update_job_progress(job_id, 80.0, "Generating questions")

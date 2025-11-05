@@ -183,7 +183,7 @@ Extract 5-10 key concepts maximum."""
         try:
             job = self._get_job(db, job_id)
             if job:
-                job.summary = summary
+                job.update_output_config(summary=summary)
             db.commit()
         except Exception:
             db.rollback()

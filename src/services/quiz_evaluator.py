@@ -73,12 +73,14 @@ class QuizEvaluator:
             "correct_answer": correct_answer,
             "score": score,
             "max_score": question["max_score"],
+            "is_correct": is_correct,
             "evaluation_method": "exact_match",
             "feedback": "Correct!" if is_correct else f"Incorrect. The correct answer is: {correct_answer}. {answer_config.get('reason', '')}"
         }
 
     async def _evaluate_subjective_question(self, question: Dict, user_answer: str) -> Dict[str, Any]:
         answer_config = question["answer_config"]
+        correct_answer = answer_config.get("correct_answer", "No model answer provided")
 
         prompt = self._build_evaluation_prompt(question, user_answer, answer_config)
 
@@ -86,11 +88,16 @@ class QuizEvaluator:
             llm_response = await self.llm_provider.generate_async(prompt)
             evaluation_result = self._parse_llm_evaluation(llm_response)
 
+            final_score = min(evaluation_result["score"], question["max_score"])
+            is_correct = final_score == question["max_score"]
+
             return {
                 "question_id": question["question_id"],
                 "user_answer": user_answer,
-                "score": min(evaluation_result["score"], question["max_score"]),
+                "correct_answer": correct_answer,
+                "score": final_score,
                 "max_score": question["max_score"],
+                "is_correct": is_correct,
                 "evaluation_method": "llm_evaluated",
                 "feedback": evaluation_result["feedback"]
             }
@@ -100,8 +107,10 @@ class QuizEvaluator:
             return {
                 "question_id": question["question_id"],
                 "user_answer": user_answer,
+                "correct_answer": correct_answer,
                 "score": 0,
                 "max_score": question["max_score"],
+                "is_correct": False,
                 "evaluation_method": "evaluation_failed",
                 "feedback": "Unable to evaluate this answer automatically."
             }

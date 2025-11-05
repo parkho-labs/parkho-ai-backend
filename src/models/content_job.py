@@ -92,8 +92,7 @@ class ContentJob(Base):
 
     def set_input_config(
         self,
-        input_url: Optional[str] = None,
-        file_ids: Optional[list[str]] = None,
+        input_config: list = None,
         question_types: Optional[list[str]] = None,
         difficulty_level: str = "intermediate",
         num_questions: int = 5,
@@ -107,11 +106,8 @@ class ContentJob(Base):
             "llm_provider": llm_provider
         }
 
-        if input_url:
-            config["input_url"] = input_url
-
-        if file_ids:
-            config["file_ids"] = file_ids
+        if input_config:
+            config["input_config"] = input_config
 
         if question_types:
             config["question_types"] = question_types

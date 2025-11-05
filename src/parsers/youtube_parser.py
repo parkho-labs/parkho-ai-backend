@@ -1,0 +1,106 @@
+import os
+import tempfile
+import asyncio
+from typing import Dict, Any
+import yt_dlp
+import openai
+from urllib.parse import urlparse
+
+from .base_parser import BaseContentParser, ContentParseResult
+from ..config import get_settings
+
+settings = get_settings()
+
+
+class YouTubeParser(BaseContentParser):
+
+    def __init__(self):
+        self.max_duration = settings.max_video_length_minutes * 60
+
+    async def parse(self, source: str, **kwargs) -> ContentParseResult:
+        try:
+            video_info = await self._extract_video_info(source)
+            if not video_info["success"]:
+                return ContentParseResult("", error=video_info["error"])
+
+            if video_info["duration"] > self.max_duration:
+                return ContentParseResult("", error=f"Video too long: {video_info['duration']/60:.1f} minutes (max: {self.max_duration/60} minutes)")
+
+            audio_path = await self._download_audio(source)
+            transcript = await self._transcribe_audio(audio_path)
+
+            os.unlink(audio_path)
+
+            return ContentParseResult(
+                content=transcript,
+                title=video_info["title"],
+                metadata={
+                    "duration": video_info["duration"],
+                    "url": source,
+                    "description": video_info.get("description", "")
+                }
+            )
+        except Exception as e:
+            return ContentParseResult("", error=f"YouTube processing failed: {str(e)}")
+
+    async def _extract_video_info(self, url: str) -> Dict[str, Any]:
+        def extract_info():
+            ydl_opts = {"quiet": True, "no_warnings": True}
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(url, download=False)
+
+        try:
+            loop = asyncio.get_event_loop()
+            info = await loop.run_in_executor(None, extract_info)
+            return {
+                "success": True,
+                "title": info.get("title", ""),
+                "duration": info.get("duration", 0),
+                "description": info.get("description", "")
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _download_audio(self, url: str) -> str:
+        def download():
+            with tempfile.NamedTemporaryFile(suffix=".%(ext)s", delete=False) as temp_file:
+                output_template = temp_file.name.replace(".%(ext)s", "")
+
+            ydl_opts = {
+                "format": "bestaudio/best",
+                "outtmpl": f"{output_template}.%(ext)s",
+                "postprocessors": [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                }],
+                "quiet": True,
+                "no_warnings": True
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+
+            return f"{output_template}.mp3"
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, download)
+
+    async def _transcribe_audio(self, audio_path: str) -> str:
+        def transcribe():
+            client = openai.OpenAI(api_key=settings.openai_api_key)
+            with open(audio_path, "rb") as audio_file:
+                response = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file
+                )
+            return response.text
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, transcribe)
+
+    def supports_source(self, source: str) -> bool:
+        return "youtube.com" in source or "youtu.be" in source
+
+    @property
+    def supported_types(self) -> list[str]:
+        return ["youtube"]

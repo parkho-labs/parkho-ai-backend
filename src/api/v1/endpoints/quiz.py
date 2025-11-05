@@ -1,6 +1,7 @@
 import structlog
 from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException
+import openai
 
 from ...dependencies import get_quiz_repository, get_content_job_repository
 from ..schemas import QuizResponse, QuizSubmission
@@ -113,12 +114,31 @@ async def submit_content_quiz(
             for question_id, user_answer in submission.answers.items()
         ]
 
-        evaluator = QuizEvaluator(None)
+        class OpenAIWrapper:
+            def __init__(self, api_key):
+                self.client = openai.OpenAI(api_key=api_key)
+
+            async def generate_async(self, prompt):
+                response = self.client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1
+                )
+                return response.choices[0].message.content
+
+        llm_provider = OpenAIWrapper(settings.openai_api_key)
+        evaluator = QuizEvaluator(llm_provider)
         evaluation_result = await evaluator.evaluate_quiz_submission(questions_data, user_answers)
+
+        # Calculate percentage
+        percentage = 0.0
+        if evaluation_result["max_possible_score"] > 0:
+            percentage = (evaluation_result["total_score"] / evaluation_result["max_possible_score"]) * 100
 
         return {
             "total_score": evaluation_result["total_score"],
             "max_possible_score": evaluation_result["max_possible_score"],
+            "percentage": round(percentage, 2),
             "evaluated_at": evaluation_result["evaluated_at"],
             "results": evaluation_result["question_results"]
         }

@@ -66,7 +66,6 @@ async def process_content(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     repo = Depends(get_content_job_repository),
-    file_storage = Depends(get_file_storage),
     current_user: Optional[User] = Depends(get_current_user_optional)
 ) -> List[FileProcessingResult]:
     """
@@ -76,113 +75,51 @@ async def process_content(
     for future extensibility to multiple files.
     """
     try:
-        # Initialize duplicate detector
-        duplicate_detector = DuplicateDetector(db)
         results = []
 
-        # Handle uploaded files (current implementation)
-        if request.file_ids:
-            # Validation is already handled by Pydantic validators in ContentProcessingRequest
-            for file_id in request.file_ids:
-                # Verify file exists
-                if not file_storage.get_file_metadata(file_id):
-                    results.append(FileProcessingResult(
-                        file_id=file_id,
-                        job_id=None,
-                        status=JobStatus.FAILED,
-                        message=f"File not found: {file_id}",
-                        error_details="The specified file_id does not exist or has been deleted"
-                    ))
-                    continue
+        # Process multimodal input configuration
+        user_id = current_user.id if current_user else None
+        job = repo.create_job(user_id=user_id)
 
-                # Check for duplicates
-                duplicate_result = duplicate_detector.check_file_processing_status(file_id)
+        # Convert input_config to dict format for storage
+        input_config_data = []
+        for input_item in request.input_config:
+            input_config_data.append({
+                "content_type": input_item.content_type.value,
+                "id": input_item.id
+            })
 
-                # If file can be processed (no duplicates or previous failed)
-                if duplicate_result.status == JobStatus.PENDING and duplicate_result.job_id is None:
-                    # Create new job
-                    user_id = current_user.id if current_user else None
-                    job = repo.create_job(user_id=user_id)
+        job.set_input_config(
+            input_config=input_config_data,
+            question_types=[qt.value for qt in request.question_types],
+            difficulty_level=request.difficulty_level.value,
+            num_questions=request.num_questions,
+            generate_summary=request.generate_summary,
+            llm_provider=request.llm_provider.value
+        )
+        repo.update_job(job)
 
-                    job.set_input_config(
-                        file_ids=[file_id],
-                        question_types=[qt.value for qt in request.question_types],
-                        difficulty_level=request.difficulty_level.value,
-                        num_questions=request.num_questions,
-                        generate_summary=request.generate_summary,
-                        llm_provider=request.llm_provider.value
-                    )
-                    repo.update_job(job)
+        # Start background processing
+        background_tasks.add_task(
+            content_processor.process_content_background_sync,
+            job.id
+        )
 
-                    # Start background processing
-                    background_tasks.add_task(
-                        content_processor.process_content_background_sync,
-                        job.id
-                    )
+        results.append(FileProcessingResult(
+            file_id="multimodal_content",
+            job_id=job.id,
+            status=JobStatus.PENDING,
+            message="Multimodal content processing started successfully",
+            estimated_duration_minutes=5,
+            websocket_url=f"ws://localhost:{settings.api_port}/ws/content/{job.id}"
+        ))
 
-                    results.append(FileProcessingResult(
-                        file_id=file_id,
-                        job_id=job.id,
-                        status=JobStatus.PENDING,
-                        message="File processing started successfully",
-                        estimated_duration_minutes=5,
-                        websocket_url=f"ws://localhost:{settings.api_port}/ws/content/{job.id}"
-                    ))
-
-                    logger.info(
-                        "New content processing job created",
-                        job_id=job.id,
-                        file_id=file_id,
-                        question_types=[qt.value for qt in request.question_types]
-                    )
-                else:
-                    # File is duplicate or already processing
-                    results.append(duplicate_result)
-                    logger.info(
-                        "Duplicate file processing request detected",
-                        file_id=file_id,
-                        existing_job_id=duplicate_result.job_id,
-                        status=duplicate_result.status
-                    )
-
-        # Handle input URLs (YouTube, web, etc.)
-        elif request.input_url:
-            # For URL processing, we don't have file_id duplicates,
-            # but we could implement URL-based duplicate detection in the future
-            user_id = current_user.id if current_user else None
-            job = repo.create_job(user_id=user_id)
-
-            job.set_input_config(
-                input_url=request.input_url,
-                question_types=[qt.value for qt in request.question_types],
-                difficulty_level=request.difficulty_level.value,
-                num_questions=request.num_questions,
-                generate_summary=request.generate_summary,
-                llm_provider=request.llm_provider.value
-            )
-            repo.update_job(job)
-
-            # Start background processing
-            background_tasks.add_task(
-                content_processor.process_content_background_sync,
-                job.id
-            )
-
-            results.append(FileProcessingResult(
-                file_id="url_content",  # Placeholder for URL content
-                job_id=job.id,
-                status=JobStatus.PENDING,
-                message="URL content processing started successfully",
-                estimated_duration_minutes=5,
-                websocket_url=f"ws://localhost:{settings.api_port}/ws/content/{job.id}"
-            ))
-
-            logger.info(
-                "URL content processing job created",
-                job_id=job.id,
-                input_url=request.input_url,
-                question_types=[qt.value for qt in request.question_types]
-            )
+        logger.info(
+            "Multimodal content processing job created",
+            job_id=job.id,
+            input_config=input_config_data,
+            question_types=[qt.value for qt in request.question_types]
+        )
 
         # Set appropriate HTTP status code
         if any(result.status == JobStatus.FAILED for result in results):

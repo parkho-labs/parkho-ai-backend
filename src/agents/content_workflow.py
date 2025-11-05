@@ -1,5 +1,6 @@
 from typing import Dict, Any, List
 from datetime import datetime
+import asyncio
 import structlog
 
 from .content_analyzer import ContentAnalyzerAgent
@@ -34,43 +35,40 @@ class ContentWorkflow:
             if not input_config:
                 raise ValueError("No input configuration found")
 
-            input_url = input_config.get("input_url")
-            uploaded_files = input_config.get("file_ids", [])
+            input_sources = input_config.get("input_config", [])
+            if not input_sources:
+                raise ValueError("No input sources found")
+
+            await self.update_job_progress(job_id, 10.0, "Parsing content...")
+
+            parse_tasks = []
+            for source in input_sources:
+                content_type = source.get("content_type")
+                source_id = source.get("id")
+
+                if content_type in ["pdf", "docx"]:
+                    parse_tasks.append(self._parse_file(content_type, source_id))
+                else:
+                    parse_tasks.append(self._parse_url(content_type, source_id))
+
+            results = await asyncio.gather(*parse_tasks, return_exceptions=True)
 
             all_content = []
             all_titles = []
 
-            await self.update_job_progress(job_id, 10.0, "Parsing content...")
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(f"Failed to parse content source {i}: {str(result)}")
+                    continue
 
-            if input_url:
-                content_type = self._detect_url_type(input_url)
-                parser = self.parser_factory.get_parser(content_type)
-                if parser:
-                    result = await parser.parse(input_url)
-                    if result.success:
-                        all_content.append(result.content)
-                        if result.title:
-                            all_titles.append(result.title)
-
-            if uploaded_files:
-                db = SessionLocal()
-                try:
-                    file_repo = FileRepository(db)
-                    file_storage = FileStorageService(file_repo)
-
-                    for file_id in uploaded_files:
-                        file_path = file_storage.get_file_path(file_id)
-                        if file_path:
-                            file_ext = file_path.split('.')[-1].lower()
-                            parser = self.parser_factory.get_parser(file_ext)
-                            if parser:
-                                result = await parser.parse(file_path)
-                                if result.success:
-                                    all_content.append(result.content)
-                                    if result.title:
-                                        all_titles.append(result.title)
-                finally:
-                    db.close()
+                if result and result.success:
+                    all_content.append(result.content)
+                    if result.title:
+                        all_titles.append(result.title)
+                else:
+                    logger.error(f"Content source {i} failed or returned no content. Result: {result}")
+                    if result and hasattr(result, 'error'):
+                        logger.error(f"Error details: {result.error}")
 
             if not all_content:
                 raise ValueError("No content could be extracted from provided sources")
@@ -209,5 +207,29 @@ class ContentWorkflow:
         except Exception:
             db.rollback()
             raise
+        finally:
+            db.close()
+
+    async def _parse_url(self, content_type: str, url: str):
+        parser = self.parser_factory.get_parser(content_type)
+        if not parser:
+            raise ValueError(f"No parser available for content type: {content_type}")
+        return await parser.parse(url)
+
+    async def _parse_file(self, content_type: str, file_id: str):
+        db = SessionLocal()
+        try:
+            file_repo = FileRepository(db)
+            file_storage = FileStorageService(file_repo)
+            file_path = file_storage.get_file_path(file_id)
+
+            if not file_path:
+                raise ValueError(f"File not found: {file_id}")
+
+            parser = self.parser_factory.get_parser(content_type)
+            if not parser:
+                raise ValueError(f"No parser available for content type: {content_type}")
+
+            return await parser.parse(file_path)
         finally:
             db.close()
