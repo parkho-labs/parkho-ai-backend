@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     use_secret_manager: bool = Field(default=False, description="Use Secret Manager for API keys")
 
     # RAG Engine Configuration
-    rag_engine_url: str = Field(default="http://localhost:8001/api/v1", description="RAG Engine API base URL")
+    rag_engine_url: str = Field(default="https://rag-engine-api-846780462763.us-central1.run.app/api/v1", description="RAG Engine API base URL")
 
     # Analytics Dashboard Configuration
     analytics_provider: str = Field(default="google_studio", description="Analytics dashboard provider")

@@ -58,11 +58,31 @@ class YouTubeParser(BaseContentParser):
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
-                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "extractor_retries": 3,
                 "fragment_retries": 3,
                 "http_chunk_size": 10485760,
+                "socket_timeout": 30,
+                # Anti-bot detection measures
+                "sleep_interval": 1,
+                "sleep_interval_requests": 1,
+                "http_headers": {
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-us,en;q=0.5",
+                    "Accept-Encoding": "gzip, deflate",
+                    "DNT": "1",
+                    "Connection": "keep-alive",
+                    "Upgrade-Insecure-Requests": "1",
+                },
             }
+
+            # Try to use browser cookies if available
+            try:
+                ydl_opts["cookiesfrombrowser"] = ("chrome",)
+            except:
+                # If browser cookies fail, continue without them
+                pass
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 return ydl.extract_info(url, download=False)
 
@@ -94,13 +114,31 @@ class YouTubeParser(BaseContentParser):
                 }],
                 "quiet": True,
                 "no_warnings": True,
-                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "extractor_retries": 3,
                 "fragment_retries": 3,
                 "http_chunk_size": 10485760,
                 "socket_timeout": 30,
                 "retries": 5,
+                # Anti-bot detection measures
+                "sleep_interval": 1,
+                "sleep_interval_requests": 1,
+                "http_headers": {
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-us,en;q=0.5",
+                    "Accept-Encoding": "gzip, deflate",
+                    "DNT": "1",
+                    "Connection": "keep-alive",
+                    "Upgrade-Insecure-Requests": "1",
+                },
             }
+
+            # Try to use browser cookies if available
+            try:
+                ydl_opts["cookiesfrombrowser"] = ("chrome",)
+            except:
+                # If browser cookies fail, continue without them
+                pass
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
