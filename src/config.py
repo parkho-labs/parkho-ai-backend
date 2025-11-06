@@ -68,6 +68,15 @@ class Settings(BaseSettings):
     # RAG Engine Configuration
     rag_engine_url: str = Field(default="http://localhost:8001/api/v1", description="RAG Engine API base URL")
 
+    # Analytics Dashboard Configuration
+    analytics_provider: str = Field(default="google_studio", description="Analytics dashboard provider")
+
+    # Google Data Studio Configuration
+    google_studio_learning_report_id: str = Field(default="", description="Google Data Studio learning analytics report ID")
+    google_studio_quiz_report_id: str = Field(default="", description="Google Data Studio quiz performance report ID")
+    google_studio_content_report_id: str = Field(default="", description="Google Data Studio content analytics report ID")
+    google_studio_user_report_id: str = Field(default="", description="Google Data Studio user insights report ID")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from .endpoints import websocket, quiz, auth, content, health, analytics
+from .endpoints import websocket, quiz, auth, content, health, analytics, analytics_dashboard
 
 api_router = APIRouter()
 
@@ -10,4 +10,5 @@ api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(content.router, prefix="/content", tags=["content"])
 api_router.include_router(quiz.router, prefix="/content/{content_id}/quiz", tags=["quiz"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
+api_router.include_router(analytics_dashboard.router, prefix="/analytics-dashboard", tags=["analytics-dashboard"])
 api_router.include_router(websocket.router, tags=["websocket"])

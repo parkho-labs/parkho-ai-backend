@@ -10,6 +10,7 @@ from ..repositories.quiz_repository import QuizRepository
 from ..repositories.analytics_repository import AnalyticsRepository
 from ..services.file_storage import FileStorageService
 from ..services.analytics_service import AnalyticsService
+from ..services.analytics_dashboard_service import get_analytics_dashboard_service, AnalyticsDashboardService
 from ..models.user import User
 
 security = HTTPBearer(auto_error=False)
@@ -38,6 +39,11 @@ def get_analytics_repository(db: Session = Depends(get_db)) -> AnalyticsReposito
 
 def get_analytics_service(repo: AnalyticsRepository = Depends(get_analytics_repository)) -> AnalyticsService:
     return AnalyticsService(repo)
+
+
+def get_analytics_dashboard_service_dep() -> AnalyticsDashboardService:
+    """Get analytics dashboard service dependency."""
+    return get_analytics_dashboard_service()
 
 
 def get_current_user_optional() -> Optional[User]:
