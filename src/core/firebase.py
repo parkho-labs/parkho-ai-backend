@@ -14,13 +14,28 @@ _firebase_app = None
 def initialize_firebase():
     global _firebase_app
     if _firebase_app is None:
-        if os.path.exists(settings.firebase_service_account_path):
-            cred = credentials.Certificate(settings.firebase_service_account_path)
+        try:
+            # Try Secret Manager (production) or local file (development)
+            secret_name = os.getenv('FIREBASE_SECRET_NAME', 'firebase-service-account')
+
+            try:
+                from google.cloud import secretmanager
+                client = secretmanager.SecretManagerServiceClient()
+                name = f"projects/{settings.firebase_project_id}/secrets/{secret_name}/versions/latest"
+                response = client.access_secret_version(request={"name": name})
+                import json
+                service_account_info = json.loads(response.payload.data.decode("UTF-8"))
+                cred = credentials.Certificate(service_account_info)
+            except:
+                # Fallback to local file
+                cred = credentials.Certificate(settings.firebase_service_account_path)
+
             _firebase_app = firebase_admin.initialize_app(cred, {
                 'projectId': settings.firebase_project_id
             })
-        else:
-            _firebase_app = firebase_admin.initialize_app()
+        except Exception as e:
+            print(f"Firebase initialization failed: {e}")
+            return None
     return _firebase_app
 
 def verify_firebase_token(token: str) -> Optional[Dict[str, Any]]:

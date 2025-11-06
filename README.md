@@ -45,7 +45,7 @@ alembic upgrade head
 
 6. **Start the server**
 ```bash
-python -m uvicorn src.main:app --host 127.0.0.1 --port 8000
+python -m uvicorn src.main:app --host 127.0.0.1 --port 8080
 ```
 
 7. **Access the API**

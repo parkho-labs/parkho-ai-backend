@@ -11,6 +11,7 @@ from ..core.websocket_manager import websocket_manager
 from ..parsers.content_parser_factory import ContentParserFactory
 from ..services.file_storage import FileStorageService
 from ..repositories.file_repository import FileRepository
+from ..services.rag_integration_service import get_rag_service
 
 logger = structlog.get_logger(__name__)
 
@@ -20,6 +21,11 @@ class ContentWorkflow:
         self.content_analyzer = ContentAnalyzerAgent()
         self.question_generator = QuestionGeneratorAgent()
         self.parser_factory = ContentParserFactory()
+        try:
+            self.rag_service = get_rag_service()
+        except Exception as e:
+            logger.warning(f"RAG service initialization failed: {e}")
+            self.rag_service = None
 
     async def process_content(self, job_id: int):
         logger.info("Starting content processing workflow", job_id=job_id)
@@ -76,11 +82,32 @@ class ContentWorkflow:
             combined_content = "\n\n--- NEXT DOCUMENT ---\n\n".join(all_content)
             combined_title = " & ".join(all_titles) if all_titles else "Processed Content"
 
+            # Get RAG context if collection is specified
+            rag_context = ""
+            if job.collection_name and self.rag_service:
+                await self.update_job_progress(job_id, 25.0, "Retrieving collection context...")
+                try:
+                    # Use a summary or title as query for relevant context
+                    context_query = combined_title or combined_content[:200]
+                    rag_context = await self.rag_service.get_collection_context(
+                        job.collection_name,
+                        context_query
+                    )
+                    if rag_context:
+                        job.rag_context_used = True
+                        await self.update_job_in_db(job)
+                        logger.info("RAG context retrieved", job_id=job_id, context_length=len(rag_context))
+                except Exception as e:
+                    logger.warning("Failed to retrieve RAG context", job_id=job_id, error=str(e))
+            elif job.collection_name and not self.rag_service:
+                logger.warning("Collection specified but RAG service unavailable", job_id=job_id)
+
             await self.update_job_progress(job_id, 30.0, "Analyzing content...")
 
             analysis_data = {
                 "transcript": combined_content,
-                "video_title": combined_title,
+                "video_metadata": {"title": combined_title},
+                "rag_context": rag_context,  # Add RAG context to analysis data
                 **input_config
             }
 
@@ -132,6 +159,18 @@ class ContentWorkflow:
         db = SessionLocal()
         try:
             return db.query(ContentJob).filter(ContentJob.id == job_id).first()
+        finally:
+            db.close()
+
+    async def update_job_in_db(self, job: ContentJob):
+        """Update job in database"""
+        db = SessionLocal()
+        try:
+            db.merge(job)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 

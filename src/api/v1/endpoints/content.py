@@ -97,6 +97,11 @@ async def process_content(
             generate_summary=request.generate_summary,
             llm_provider=request.llm_provider.value
         )
+
+        # Set collection/RAG fields
+        job.collection_name = request.collection_name
+        job.should_add_to_collection = request.should_add_to_collection
+
         repo.update_job(job)
 
         # Start background processing

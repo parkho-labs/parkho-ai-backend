@@ -9,6 +9,7 @@ from ..config import get_settings
 from ..models.content_job import ContentJob
 from ..repositories.quiz_repository import QuizRepository
 from ..core.database import SessionLocal
+from ..services.llm_service import LLMService
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -17,6 +18,14 @@ logger = structlog.get_logger(__name__)
 class QuestionGeneratorAgent(ContentTutorAgent):
     def __init__(self):
         super().__init__("question_generator")
+
+        # Initialize multi-provider LLM service
+        self.llm_service = LLMService(
+            openai_api_key=settings.openai_api_key,
+            anthropic_api_key=settings.anthropic_api_key,
+            google_api_key=settings.google_api_key
+        )
+
 
     def get_model_client(self):
         return openai.OpenAI(api_key=settings.openai_api_key)

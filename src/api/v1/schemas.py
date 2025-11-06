@@ -50,6 +50,10 @@ class ContentProcessingRequest(BaseModel):
     generate_summary: bool = Field(default=True)
     llm_provider: LLMProvider = Field(default=LLMProvider.OPENAI)
 
+    # RAG/Collection fields
+    collection_name: Optional[str] = Field(default=None, description="Collection to use for RAG context")
+    should_add_to_collection: bool = Field(default=False, description="Whether to add processed content to the collection")
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -61,7 +65,9 @@ class ContentProcessingRequest(BaseModel):
                 "difficulty_level": "intermediate",
                 "num_questions": 5,
                 "generate_summary": True,
-                "llm_provider": "openai"
+                "llm_provider": "openai",
+                "collection_name": "physics_course",
+                "should_add_to_collection": True
             }
         }
 

@@ -2,11 +2,13 @@ import structlog
 from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException
 import openai
+from datetime import datetime
 
-from ...dependencies import get_quiz_repository, get_content_job_repository
+from ...dependencies import get_quiz_repository, get_content_job_repository, get_analytics_service
 from ..schemas import QuizResponse, QuizSubmission
 from ....core.exceptions import JobNotFoundError
 from ....services.quiz_evaluator import QuizEvaluator
+from ....services.analytics_service import AnalyticsService
 from ....config import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -18,7 +20,8 @@ router = APIRouter()
 async def get_content_quiz(
     content_id: int,
     quiz_repo = Depends(get_quiz_repository),
-    content_repo = Depends(get_content_job_repository)
+    content_repo = Depends(get_content_job_repository),
+    analytics = Depends(get_analytics_service)
 ) -> Dict[str, Any]:
     try:
         job = content_repo.get(content_id)
@@ -60,6 +63,9 @@ async def get_content_quiz(
 
         total_score = quiz_repo.get_total_score_by_job_id(content_id)
 
+        # Track quiz started event
+        analytics.track_quiz_start(user_id=1, quiz_id=content_id)  # Temporary user_id=1
+
         return {
             "questions": quiz_questions,
             "total_questions": len(questions),
@@ -80,7 +86,8 @@ async def submit_content_quiz(
     content_id: int,
     submission: QuizSubmission,
     quiz_repo = Depends(get_quiz_repository),
-    content_repo = Depends(get_content_job_repository)
+    content_repo = Depends(get_content_job_repository),
+    analytics = Depends(get_analytics_service)
 ) -> Dict[str, Any]:
     try:
         job = content_repo.get(content_id)
@@ -134,6 +141,14 @@ async def submit_content_quiz(
         percentage = 0.0
         if evaluation_result["max_possible_score"] > 0:
             percentage = (evaluation_result["total_score"] / evaluation_result["max_possible_score"]) * 100
+
+        # Track quiz completion event
+        analytics.track_quiz_completion(
+            user_id=1,  # Temporary user_id=1
+            quiz_id=content_id,
+            score=evaluation_result["total_score"],
+            duration=300  # Temporary duration, will calculate properly later
+        )
 
         return {
             "total_score": evaluation_result["total_score"],

@@ -7,7 +7,9 @@ from ..core.database import get_db
 from ..repositories.content_job_repository import ContentJobRepository
 from ..repositories.file_repository import FileRepository
 from ..repositories.quiz_repository import QuizRepository
+from ..repositories.analytics_repository import AnalyticsRepository
 from ..services.file_storage import FileStorageService
+from ..services.analytics_service import AnalyticsService
 from ..models.user import User
 
 security = HTTPBearer(auto_error=False)
@@ -28,6 +30,14 @@ def get_quiz_repository(db: Session = Depends(get_db)) -> QuizRepository:
 def get_file_storage(db: Session = Depends(get_db)) -> FileStorageService:
     file_repo = FileRepository(db)
     return FileStorageService(file_repo)
+
+
+def get_analytics_repository(db: Session = Depends(get_db)) -> AnalyticsRepository:
+    return AnalyticsRepository(db)
+
+
+def get_analytics_service(repo: AnalyticsRepository = Depends(get_analytics_repository)) -> AnalyticsService:
+    return AnalyticsService(repo)
 
 
 def get_current_user_optional() -> Optional[User]:

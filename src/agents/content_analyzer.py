@@ -1,4 +1,5 @@
 import json
+import structlog
 from typing import Dict, Any, List
 
 import openai
@@ -7,10 +8,10 @@ from .base import ContentTutorAgent
 from ..config import get_settings
 from ..models.content_job import ContentJob
 from ..core.database import SessionLocal
+from ..services.llm_service import LLMService
 
 settings = get_settings()
-
-# Testing for pr raise
+logger = structlog.get_logger(__name__)
 
 
 class ContentAnalyzerAgent(ContentTutorAgent):
@@ -18,6 +19,14 @@ class ContentAnalyzerAgent(ContentTutorAgent):
         super().__init__("content_analyzer")
         self.chunk_size = 2000
         self.chunk_overlap = 200
+
+        # Initialize multi-provider LLM service
+        self.llm_service = LLMService(
+            openai_api_key=settings.openai_api_key,
+            anthropic_api_key=settings.anthropic_api_key,
+            google_api_key=settings.google_api_key
+        )
+
 
     def get_model_client(self):
         return openai.OpenAI(api_key=settings.openai_api_key)
@@ -87,33 +96,35 @@ class ContentAnalyzerAgent(ContentTutorAgent):
 - content_type: Type of content (lecture, tutorial, discussion, etc.)
 - difficulty_level: beginner, intermediate, or advanced
 - structure: brief description of how content is organized
-- learning_objectives: 3-5 key learning objectives"""
+- learning_objectives: 3-5 key learning objectives
+
+Return only valid JSON, no additional text."""
 
         user_content = f"Video Title: {video_metadata.get('title', 'Unknown')}\n\nTranscript: {full_text[:3000]}"
 
         try:
-            client = self.get_model_client()
-
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                temperature=0.1,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content}
-                ]
+            response = await self.llm_service.generate_with_fallback(
+                system_prompt=system_prompt,
+                user_prompt=user_content,
+                temperature=0.1
             )
-            content = response.choices[0].message.content
 
-            return json.loads(content)
+            result = await self.llm_service.parse_json_response(response)
+            return result if result else self._get_fallback_analysis()
 
-        except Exception:
-            return {
-                "main_topics": ["Content analysis failed"],
-                "content_type": "unknown",
-                "difficulty_level": "intermediate",
-                "structure": "Unable to analyze structure",
-                "learning_objectives": ["Analysis failed"]
-            }
+        except Exception as e:
+            logger.error(f"Content structure analysis failed: {e}")
+            return self._get_fallback_analysis()
+
+    def _get_fallback_analysis(self) -> Dict[str, Any]:
+        """Return fallback analysis when all providers fail."""
+        return {
+            "main_topics": ["Content analysis failed"],
+            "content_type": "unknown",
+            "difficulty_level": "intermediate",
+            "structure": "Unable to analyze structure",
+            "learning_objectives": ["Analysis failed"]
+        }
 
     async def extract_key_concepts(self, transcript: str, video_metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
         system_prompt = """Extract key concepts from the transcript and return a JSON array where each concept has:
@@ -122,27 +133,28 @@ class ContentAnalyzerAgent(ContentTutorAgent):
 - importance: why this concept is important (1 sentence)
 - context: where in the content this appears
 
-Extract 5-10 key concepts maximum."""
+Extract 5-10 key concepts maximum. Return only valid JSON array, no additional text."""
 
         user_content = f"Video Title: {video_metadata.get('title', 'Unknown')}\n\nTranscript: {transcript[:4000]}"
 
         try:
-            client = self.get_model_client()
-
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                temperature=0.1,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content}
-                ]
+            response = await self.llm_service.generate_with_fallback(
+                system_prompt=system_prompt,
+                user_prompt=user_content,
+                temperature=0.1
             )
-            content = response.choices[0].message.content
 
-            concepts = json.loads(content)
-            return concepts if isinstance(concepts, list) else []
+            result = await self.llm_service.parse_json_response(response)
+            if isinstance(result, list):
+                return result
+            elif isinstance(result, dict) and 'concepts' in result:
+                concepts = result.get('concepts', [])
+                return concepts if isinstance(concepts, list) else []
+            else:
+                return []
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"Key concepts extraction failed: {e}")
             return []
 
     async def generate_summary(self, transcript: str, content_analysis: Dict[str, Any]) -> str:
@@ -159,20 +171,16 @@ Extract 5-10 key concepts maximum."""
         user_content = f"Topics covered: {topics_text}\n\nContent: {transcript[:4000]}"
 
         try:
-            client = self.get_model_client()
-
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                temperature=0.1,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content}
-                ]
+            response = await self.llm_service.generate_with_fallback(
+                system_prompt=system_prompt,
+                user_prompt=user_content,
+                temperature=0.1
             )
-            return response.choices[0].message.content
+            return response
 
-        except Exception:
-            return "Summary generation failed"
+        except Exception as e:
+            logger.error(f"Summary generation failed: {e}")
+            return "Summary generation failed - all LLM providers unavailable"
 
 
     async def update_summary(self, job_id: int, summary: str):

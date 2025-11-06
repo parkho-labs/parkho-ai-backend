@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, Dict, Any
 import json
-from sqlalchemy import Column, Integer, String, Text, Float, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Float, DateTime, ForeignKey, Boolean
 from sqlalchemy.sql import func
 import enum
 
@@ -32,6 +32,11 @@ class ContentJob(Base):
 
     title = Column(String, nullable=True)
     error_message = Column(Text, nullable=True)
+
+    # RAG/Collection integration fields
+    collection_name = Column(String, nullable=True)  # Selected collection for quiz generation
+    should_add_to_collection = Column(Boolean, default=False)  # User choice to add content to collection
+    rag_context_used = Column(Boolean, default=False)  # Track if RAG context was used in generation
 
     @property
     def input_config_dict(self) -> Optional[Dict[str, Any]]:

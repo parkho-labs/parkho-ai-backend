@@ -1,6 +1,7 @@
 import os
 import tempfile
 import asyncio
+import structlog
 from typing import Dict, Any
 import yt_dlp
 import openai
@@ -8,14 +9,21 @@ from urllib.parse import urlparse
 
 from .base_parser import BaseContentParser, ContentParseResult
 from ..config import get_settings
+from ..services.transcription_service import TranscriptionService
 
 settings = get_settings()
+logger = structlog.get_logger(__name__)
 
 
 class YouTubeParser(BaseContentParser):
 
     def __init__(self):
         self.max_duration = settings.max_video_length_minutes * 60
+        # Initialize transcription service with multiple providers
+        self.transcription_service = TranscriptionService(
+            openai_api_key=settings.openai_api_key,
+            google_api_key=settings.google_api_key
+        )
 
     async def parse(self, source: str, **kwargs) -> ContentParseResult:
         try:
@@ -27,7 +35,9 @@ class YouTubeParser(BaseContentParser):
                 return ContentParseResult("", error=f"Video too long: {video_info['duration']/60:.1f} minutes (max: {self.max_duration/60} minutes)")
 
             audio_path = await self._download_audio(source)
-            transcript = await self._transcribe_audio(audio_path)
+
+
+            transcript = await self.transcription_service.transcribe_with_fallback(audio_path)
 
             os.unlink(audio_path)
 
@@ -45,7 +55,14 @@ class YouTubeParser(BaseContentParser):
 
     async def _extract_video_info(self, url: str) -> Dict[str, Any]:
         def extract_info():
-            ydl_opts = {"quiet": True, "no_warnings": True}
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "extractor_retries": 3,
+                "fragment_retries": 3,
+                "http_chunk_size": 10485760,
+            }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 return ydl.extract_info(url, download=False)
 
@@ -59,6 +76,7 @@ class YouTubeParser(BaseContentParser):
                 "description": info.get("description", "")
             }
         except Exception as e:
+            logger.error(f"yt-dlp info extraction failed: {str(e)}")
             return {"success": False, "error": str(e)}
 
     async def _download_audio(self, url: str) -> str:
@@ -67,14 +85,21 @@ class YouTubeParser(BaseContentParser):
                 output_template = temp_file.name.replace(".%(ext)s", "")
 
             ydl_opts = {
-                "format": "bestaudio/best",
+                "format": "worstaudio[ext=m4a]/worst[ext=mp4]/bestaudio/best",
                 "outtmpl": f"{output_template}.%(ext)s",
                 "postprocessors": [{
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
+                    "preferredquality": "64"
                 }],
                 "quiet": True,
-                "no_warnings": True
+                "no_warnings": True,
+                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "extractor_retries": 3,
+                "fragment_retries": 3,
+                "http_chunk_size": 10485760,
+                "socket_timeout": 30,
+                "retries": 5,
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -85,18 +110,6 @@ class YouTubeParser(BaseContentParser):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, download)
 
-    async def _transcribe_audio(self, audio_path: str) -> str:
-        def transcribe():
-            client = openai.OpenAI(api_key=settings.openai_api_key)
-            with open(audio_path, "rb") as audio_file:
-                response = client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file
-                )
-            return response.text
-
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, transcribe)
 
     def supports_source(self, source: str) -> bool:
         return "youtube.com" in source or "youtu.be" in source
