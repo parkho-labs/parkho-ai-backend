@@ -5,6 +5,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
+
     api_host: str = Field(default="localhost", description="API host")
     api_port: int = Field(default=8000, description="API port")
     debug: bool = Field(default=False, description="Debug mode")
@@ -78,7 +79,7 @@ class Settings(BaseSettings):
     google_studio_user_report_id: str = Field(default="", description="Google Data Studio user insights report ID")
 
     class Config:
-        env_file = ".env"
+        env_file = [".env.local", ".env"]
         env_file_encoding = "utf-8"
         extra = "ignore"
 

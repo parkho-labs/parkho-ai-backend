@@ -9,7 +9,9 @@ class FileRepository:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_file(self, file_id: str, filename: str, file_path: str, file_size: int, content_type: str = None, ttl_hours: int = 24) -> UploadedFile:
+    def create_file(self, file_id: str, filename: str, file_path: str, file_size: int, 
+    content_type: str = None, ttl_hours: int = 24) -> UploadedFile:
+
         uploaded_file = UploadedFile(
             id=file_id,
             filename=filename,
@@ -25,9 +27,6 @@ class FileRepository:
 
     def get(self, file_id: str) -> Optional[UploadedFile]:
         return self.session.query(UploadedFile).filter(UploadedFile.id == file_id).first()
-
-    def get_multiple(self, file_ids: List[str]) -> List[UploadedFile]:
-        return self.session.query(UploadedFile).filter(UploadedFile.id.in_(file_ids)).all()
 
     def get_expired_files(self) -> List[UploadedFile]:
         now = datetime.utcnow()

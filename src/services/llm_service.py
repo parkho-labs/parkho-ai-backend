@@ -17,8 +17,6 @@ class LLMProvider(str, Enum):
 
 
 class LLMService:
-    """Multi-provider LLM service with automatic fallbacks."""
-
     def __init__(
         self,
         openai_api_key: Optional[str] = None,

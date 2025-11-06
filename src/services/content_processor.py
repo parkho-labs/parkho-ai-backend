@@ -1,6 +1,5 @@
 import asyncio
 import structlog
-from typing import Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 import threading
 
@@ -26,8 +25,6 @@ class ContentProcessorService:
             self.rag_service = None
 
     def process_content_background_sync(self, job_id: int):
-        logger.info("Content processing background sync started", job_id=job_id)
-
         def run_in_thread():
             logger.info("Content processing thread started", job_id=job_id)
             try:
@@ -37,11 +34,8 @@ class ContentProcessorService:
 
         thread = threading.Thread(target=run_in_thread, daemon=True)
         thread.start()
-        logger.info("Content processing thread spawned", job_id=job_id, thread_id=thread.ident)
 
     async def process_content_background(self, job_id: int):
-        logger.info("Starting content processing", job_id=job_id)
-
         if job_id in self.running_jobs:
             logger.warning("Job already running", job_id=job_id)
             return
@@ -51,9 +45,6 @@ class ContentProcessorService:
         try:
             logger.info("Calling workflow.process_content", job_id=job_id)
             await self.workflow.process_content(job_id)
-            logger.info("Content processing completed successfully", job_id=job_id)
-
-            # Handle collection linking after main processing is complete
             await self.process_collection_linking(job_id)
 
         except Exception as e:
@@ -69,11 +60,7 @@ class ContentProcessorService:
         return len(self.running_jobs)
 
     async def process_collection_linking(self, job_id: int):
-        """
-        Handle linking processed content to collections as background job
-        """
         try:
-            # Get job details
             job = await self.get_job(job_id)
             if not job or not job.should_add_to_collection or not job.collection_name:
                 logger.debug("No collection linking required", job_id=job_id)

@@ -1,8 +1,24 @@
-from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from datetime import datetime
+from typing import Optional, List, Dict, Generic, TypeVar
 from enum import Enum
 
-from pydantic import BaseModel, Field, HttpUrl, validator
+from pydantic import BaseModel, Field
+
+T = TypeVar('T')
+
+class StandardAPIResponse(BaseModel, Generic[T]):
+    status: str = Field(..., description="success or error")
+    body: Optional[T] = Field(None, description="Response body")
+    message: Optional[str] = Field(None, description="Human readable message")
+    error_code: Optional[str] = Field(None, description="Error code for client handling")
+
+    @classmethod
+    def success(cls, data: T, message: str = "Success"):
+        return cls(status="success", data=data, message=message)
+
+    @classmethod
+    def error(cls, message: str, error_code: str = None):
+        return cls(status="error", message=message, error_code=error_code)
 
 
 class JobStatus(str, Enum):
@@ -19,6 +35,21 @@ class QuestionType(str, Enum):
     SHORT_ANSWER = "short_answer"
 
 
+class QuestionTypeCount(BaseModel):
+    question_type: QuestionType
+    count: int
+
+
+class QuestionCountsResponse(BaseModel):
+    counts: List[QuestionTypeCount]
+
+    def get_count_for_type(self, question_type: QuestionType) -> int:
+        for item in self.counts:
+            if item.question_type == question_type:
+                return item.count
+        return 0
+
+
 class DifficultyLevel(str, Enum):
     BEGINNER = "beginner"
     INTERMEDIATE = "intermediate"
@@ -27,14 +58,15 @@ class DifficultyLevel(str, Enum):
 
 class LLMProvider(str, Enum):
     OPENAI = "openai"
+    GEMINI = "gemini"
     ANTHROPIC = "anthropic"
-
 
 class InputType(str, Enum):
     YOUTUBE = "youtube"
     PDF = "pdf"
     DOCX = "docx"
     WEB_URL = "web_url"
+    RAG = "rag"
 
 
 class ContentInput(BaseModel):
@@ -49,8 +81,6 @@ class ContentProcessingRequest(BaseModel):
     num_questions: int = Field(default=5, ge=1, le=50)
     generate_summary: bool = Field(default=True)
     llm_provider: LLMProvider = Field(default=LLMProvider.OPENAI)
-
-    # RAG/Collection fields
     collection_name: Optional[str] = Field(default=None, description="Collection to use for RAG context")
     should_add_to_collection: bool = Field(default=False, description="Whether to add processed content to the collection")
 
@@ -72,21 +102,16 @@ class ContentProcessingRequest(BaseModel):
         }
 
 
-class FileUploadResponse(BaseModel):
-    file_id: str
-    filename: str
-    file_size: int
-    content_type: Optional[str]
-    upload_timestamp: datetime
-
-
-class ContentJobResponse(BaseModel):
-    id: int
+class ContentJobBase(BaseModel):
     status: JobStatus
-    progress: float = Field(..., ge=0.0, le=100.0)
     created_at: datetime
     completed_at: Optional[datetime]
     title: Optional[str]
+
+
+class ContentJobResponse(ContentJobBase):
+    id: int
+    progress: float = Field(..., ge=0.0, le=100.0)
     error_message: Optional[str]
     input_url: Optional[str] = None
     file_ids: List[str] = Field(default=[])
@@ -94,8 +119,21 @@ class ContentJobResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class ContentResults(ContentJobBase):
+    job_id: int
+    processing_duration_seconds: Optional[int]
+    summary: Optional[str] = None
+    questions: Optional[List[dict]] = None
+    content_text: Optional[str] = None
 
-# Individual file processing result for 207 Multi-Status response
+
+class FileUploadResponse(BaseModel):
+    file_id: str
+    filename: str
+    file_size: int
+    content_type: str
+    upload_timestamp: datetime
+
 class FileProcessingResult(BaseModel):
     file_id: str
     job_id: Optional[int] = None
@@ -118,48 +156,6 @@ class FileProcessingResult(BaseModel):
         }
 
 
-# 207 Multi-Status response for content processing
-class MultiStatusProcessingResponse(BaseModel):
-    results: List[FileProcessingResult]
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "results": [
-                    {
-                        "file_id": "file_abc123",
-                        "job_id": 42,
-                        "status": "processing",
-                        "message": "File processing started successfully",
-                        "estimated_duration_minutes": 5,
-                        "websocket_url": "ws://127.0.0.1:8080/ws/jobs/42"
-                    }
-                ]
-            }
-        }
-
-
-# Legacy single job response (kept for backward compatibility)
-class ProcessingJobResponse(BaseModel):
-    job_id: int
-    status: JobStatus
-    message: str
-    estimated_duration_minutes: int
-    websocket_url: str
-
-
-class ContentResults(BaseModel):
-    job_id: int
-    status: JobStatus
-    title: Optional[str]
-    processing_duration_seconds: Optional[int]
-    created_at: datetime
-    completed_at: Optional[datetime]
-    summary: Optional[str] = None
-    questions: Optional[List[dict]] = None
-    content_text: Optional[str] = None
-
-
 class SummaryResponse(BaseModel):
     summary: Optional[str]
 
@@ -168,34 +164,9 @@ class ContentTextResponse(BaseModel):
     content_text: Optional[str]
 
 
-class WebSocketMessage(BaseModel):
-    job_id: int
-    message_type: str
-    data: Dict[str, Any]
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
 class ContentJobsListResponse(BaseModel):
     total: int
     jobs: List[ContentJobResponse]
-
-
-class ErrorResponse(BaseModel):
-    error: str
-    message: str
-    details: Optional[Dict[str, Any]] = None
-    request_id: Optional[str] = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class HealthResponse(BaseModel):
-    status: str
-    service: str
-    version: str
-    database: str
-    timestamp: datetime
-    environment: str
-    uptime_check: str
 
 
 class QuizQuestionResponse(BaseModel):

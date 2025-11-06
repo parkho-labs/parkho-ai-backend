@@ -6,10 +6,11 @@ import openai
 
 from .base import ContentTutorAgent
 from ..config import get_settings
-from ..models.content_job import ContentJob
 from ..repositories.quiz_repository import QuizRepository
 from ..core.database import SessionLocal
 from ..services.llm_service import LLMService
+from .prompts import QuestionGenerationPrompts
+from ..api.v1.schemas import QuestionType, QuestionTypeCount, QuestionCountsResponse
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -19,7 +20,6 @@ class QuestionGeneratorAgent(ContentTutorAgent):
     def __init__(self):
         super().__init__("question_generator")
 
-        # Initialize multi-provider LLM service
         self.llm_service = LLMService(
             openai_api_key=settings.openai_api_key,
             anthropic_api_key=settings.anthropic_api_key,
@@ -44,8 +44,6 @@ class QuestionGeneratorAgent(ContentTutorAgent):
             raise ValueError("No transcript available for question generation")
 
         logger.info(f"QuestionGenerator received data keys: {list(data.keys())}")
-        logger.info(f"Transcript length: {len(transcript) if transcript else 0}")
-        logger.info(f"Question types: {question_types}, Num questions: {num_questions}")
 
         try:
             await self.update_job_progress(job_id, 80.0, "Generating questions")
@@ -66,26 +64,15 @@ class QuestionGeneratorAgent(ContentTutorAgent):
 
     async def generate_questions(self, transcript: str, content_analysis: Dict[str, Any],
                                 key_concepts: List[Dict[str, Any]], question_types: List[str],
-                                difficulty_level: str, num_questions: int) -> List[Dict[str, Any]]:
+                                difficulty_level: str, num_questions: int, strategy_name: str = None) -> List[Dict[str, Any]]:
 
-        question_counts = {
-            "multiple_choice": 5,
-            "true_false": 3,
-            "short_answer": 2
-        }
-
-        if "short_answer" in question_types:
-            question_counts["multiple_choice"] = 5
-            question_counts["true_false"] = 3
-        else:
-            question_counts["multiple_choice"] = 6
-            question_counts["true_false"] = 4
+        question_counts_response = self._get_question_strategy(question_types, strategy_name)
 
         all_questions = []
         question_id_counter = 1
 
         for question_type in question_types:
-            count = question_counts.get(question_type, 1)
+            count = question_counts_response.get_count_for_type(question_type)
             questions = await self.generate_questions_by_type(
                 transcript, content_analysis, key_concepts,
                 question_type, difficulty_level, count
@@ -98,6 +85,32 @@ class QuestionGeneratorAgent(ContentTutorAgent):
             all_questions.extend(questions)
 
         return all_questions
+
+    def _get_question_strategy(self, question_types: List[str], strategy_name: str = None) -> QuestionCountsResponse:
+        import random
+
+        strategies = {
+            "balanced": {"multiple_choice": 5, "true_false": 3, "short_answer": 2},
+            "mcq_focused": {"multiple_choice": 8, "true_false": 2, "short_answer": 0},
+            "quick_assessment": {"multiple_choice": 3, "true_false": 5, "short_answer": 2},
+            "analytical": {"multiple_choice": 3, "true_false": 2, "short_answer": 5},
+            "quiz_style": {"multiple_choice": 6, "true_false": 4, "short_answer": 0}
+        }
+
+        if strategy_name and strategy_name in strategies:
+            chosen_strategy = strategies[strategy_name]
+        elif QuestionType.SHORT_ANSWER in question_types:
+            chosen_strategy = random.choice([strategies["balanced"], strategies["analytical"], strategies["quick_assessment"]])
+        else:
+            chosen_strategy = random.choice([strategies["mcq_focused"], strategies["quiz_style"]])
+
+        counts = [
+            QuestionTypeCount(question_type=QuestionType.MULTIPLE_CHOICE, count=chosen_strategy["multiple_choice"]),
+            QuestionTypeCount(question_type=QuestionType.TRUE_FALSE, count=chosen_strategy["true_false"]),
+            QuestionTypeCount(question_type=QuestionType.SHORT_ANSWER, count=chosen_strategy["short_answer"])
+        ]
+
+        return QuestionCountsResponse(counts=counts)
 
     async def generate_questions_by_type(self, transcript: str, content_analysis: Dict[str, Any],
                                         key_concepts: List[Dict[str, Any]], question_type: str,
@@ -117,14 +130,7 @@ class QuestionGeneratorAgent(ContentTutorAgent):
     async def generate_mcq(self, transcript: str, content_analysis: Dict[str, Any],
                           difficulty_level: str, num_questions: int) -> List[Dict[str, Any]]:
 
-        system_prompt = f"""Generate {num_questions} multiple-choice questions based on the content. Each question should be {difficulty_level} level and have:
-- question: the question text
-- answer_config: object with options array, correct_answer, and reason
-- context: relevant excerpt from content
-- max_score: 1
-
-Return as JSON array in this exact format:
-[{{"question": "...", "answer_config": {{"options": ["A", "B", "C", "D"], "correct_answer": "A", "reason": "..."}}, "context": "...", "max_score": 1}}]"""
+        system_prompt = QuestionGenerationPrompts.get_multiple_choice_prompt(num_questions, difficulty_level)
 
         content_summary = f"Main topics: {', '.join(content_analysis.get('main_topics', []))}"
         user_content = f"{content_summary}\n\nContent: {transcript[:3000]}"
@@ -142,16 +148,7 @@ Return as JSON array in this exact format:
     async def generate_true_false(self, transcript: str, content_analysis: Dict[str, Any],
                                  difficulty_level: str, num_questions: int) -> List[Dict[str, Any]]:
 
-        system_prompt = f"""Generate {num_questions} true/false questions based on the content. Each question should be {difficulty_level} level and have:
-- question: the true/false statement
-- answer_config: object with correct_answer ("true" or "false" as STRING) and reason
-- context: relevant excerpt from content
-- max_score: 1
-
-IMPORTANT: correct_answer must be a string "true" or "false", NOT a boolean.
-
-Return as JSON array in this exact format:
-[{{"question": "...", "answer_config": {{"correct_answer": "true", "reason": "..."}}, "context": "...", "max_score": 1}}]"""
+        system_prompt = QuestionGenerationPrompts.get_true_false_prompt(num_questions, difficulty_level)
 
         content_summary = f"Main topics: {', '.join(content_analysis.get('main_topics', []))}"
         user_content = f"{content_summary}\n\nContent: {transcript[:3000]}"
@@ -174,14 +171,7 @@ Return as JSON array in this exact format:
     async def generate_short_answer(self, transcript: str, key_concepts: List[Dict[str, Any]],
                                    difficulty_level: str, num_questions: int) -> List[Dict[str, Any]]:
 
-        system_prompt = f"""Generate {num_questions} short-answer questions based on the content. Each question should be {difficulty_level} level and have:
-- question: the question text
-- answer_config: object with correct_answer and reason
-- context: relevant excerpt from content
-- max_score: 1
-
-Return as JSON array in this exact format:
-[{{"question": "...", "answer_config": {{"correct_answer": "...", "reason": "..."}}, "context": "...", "max_score": 1}}]"""
+        system_prompt = QuestionGenerationPrompts.get_short_answer_prompt(num_questions, difficulty_level)
 
         concepts_summary = "\n".join([f"- {c.get('concept', '')}: {c.get('definition', '')}"
                                      for c in key_concepts[:5]])
@@ -200,13 +190,7 @@ Return as JSON array in this exact format:
     async def generate_long_form(self, transcript: str, content_analysis: Dict[str, Any],
                                 difficulty_level: str, num_questions: int) -> List[Dict[str, Any]]:
 
-        system_prompt = f"""Generate {num_questions} long-form essay questions based on the content. Each question should be {difficulty_level} level and have:
-- question: the question text
-- correct_answer: key points that should be covered
-- explanation: what makes a good answer
-- topic: main topic this question covers
-
-Return as JSON array."""
+        system_prompt = QuestionGenerationPrompts.get_essay_prompt(num_questions, difficulty_level)
 
         learning_objectives = content_analysis.get('learning_objectives', [])
         objectives_text = "\n".join([f"- {obj}" for obj in learning_objectives])

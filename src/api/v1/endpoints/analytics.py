@@ -8,6 +8,7 @@ from ....models.user import User
 router = APIRouter()
 
 
+#TODO Chnange the respone type to a model
 @router.get("/user/quiz-history")
 async def get_user_quiz_history(
     limit: int = 10,

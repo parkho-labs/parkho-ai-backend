@@ -20,13 +20,7 @@ async def get_dashboard_url(
     service: AnalyticsDashboardService = Depends(get_analytics_dashboard_service_dep),
     current_user: Optional[User] = Depends(get_current_user_optional)
 ) -> Dict[str, Any]:
-    """
-    Get embeddable dashboard URL for the specified dashboard type.
-
-    Returns URL that can be used in iframe for embedding dashboards.
-    """
     try:
-        # Parse filters if provided
         parsed_filters = {}
         if filters:
             try:
@@ -34,7 +28,6 @@ async def get_dashboard_url(
             except json.JSONDecodeError:
                 raise HTTPException(status_code=400, detail="Invalid JSON in filters parameter")
 
-        # Use current user if authenticated and no specific user_id provided
         effective_user_id = user_id
         if not effective_user_id and current_user:
             effective_user_id = current_user.id
@@ -59,12 +52,7 @@ async def get_dashboard_url(
 async def get_available_dashboards(
     service: AnalyticsDashboardService = Depends(get_analytics_dashboard_service_dep)
 ) -> List[Dict[str, Any]]:
-    """
-    Get list of available dashboard types and their configuration status.
-
-    Returns information about all dashboard types, whether they're configured,
-    and which provider is being used.
-    """
+    
     try:
         dashboards = service.get_available_dashboards()
         logger.info("Available dashboards retrieved", count=len(dashboards))
@@ -79,12 +67,7 @@ async def get_available_dashboards(
 async def get_provider_info(
     service: AnalyticsDashboardService = Depends(get_analytics_dashboard_service_dep)
 ) -> Dict[str, Any]:
-    """
-    Get current analytics provider information.
 
-    Returns details about the current provider, configuration status,
-    and supported dashboard types.
-    """
     try:
         provider_info = service.get_provider_info()
         logger.info("Provider info retrieved", provider=provider_info["provider"])
@@ -97,11 +80,7 @@ async def get_provider_info(
 
 @router.get("/dashboard-types")
 async def get_dashboard_types() -> Dict[str, Any]:
-    """
-    Get all supported dashboard types with descriptions.
-
-    Returns metadata about dashboard types that can be used.
-    """
+   
     dashboard_types = {
         DashboardType.LEARNING: {
             "name": "Learning Progress",
@@ -135,11 +114,7 @@ async def get_dashboard_types() -> Dict[str, Any]:
 async def validate_provider_config(
     service: AnalyticsDashboardService = Depends(get_analytics_dashboard_service_dep)
 ) -> Dict[str, Any]:
-    """
-    Validate current analytics provider configuration.
 
-    Checks if the provider is properly configured and can generate dashboard URLs.
-    """
     try:
         provider_info = service.get_provider_info()
         is_configured = service.is_provider_configured()
@@ -164,12 +139,11 @@ async def validate_provider_config(
         }
 
 
-# Health check endpoint for analytics service
+
 @router.get("/health")
 async def analytics_health_check(
     service: AnalyticsDashboardService = Depends(get_analytics_dashboard_service_dep)
 ) -> Dict[str, Any]:
-    """Health check for analytics dashboard service."""
     try:
         provider_info = service.get_provider_info()
         is_configured = service.is_provider_configured()

@@ -8,7 +8,6 @@ from ..config import get_settings
 
 settings = get_settings()
 
-# SQLite doesn't support connection pooling settings
 if settings.database_url.startswith("sqlite"):
     engine = create_engine(
         settings.database_url,

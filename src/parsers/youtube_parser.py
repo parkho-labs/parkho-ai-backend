@@ -4,8 +4,6 @@ import asyncio
 import structlog
 from typing import Dict, Any
 import yt_dlp
-import openai
-from urllib.parse import urlparse
 
 from .base_parser import BaseContentParser, ContentParseResult
 from ..config import get_settings
@@ -19,7 +17,6 @@ class YouTubeParser(BaseContentParser):
 
     def __init__(self):
         self.max_duration = settings.max_video_length_minutes * 60
-        # Initialize transcription service with multiple providers
         self.transcription_service = TranscriptionService(
             openai_api_key=settings.openai_api_key,
             google_api_key=settings.google_api_key
@@ -76,11 +73,9 @@ class YouTubeParser(BaseContentParser):
                 },
             }
 
-            # Try to use browser cookies if available
             try:
                 ydl_opts["cookiesfrombrowser"] = ("chrome",)
             except:
-                # If browser cookies fail, continue without them
                 pass
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -99,11 +94,13 @@ class YouTubeParser(BaseContentParser):
             logger.error(f"yt-dlp info extraction failed: {str(e)}")
             return {"success": False, "error": str(e)}
 
+
     async def _download_audio(self, url: str) -> str:
         def download():
             with tempfile.NamedTemporaryFile(suffix=".%(ext)s", delete=False) as temp_file:
                 output_template = temp_file.name.replace(".%(ext)s", "")
 
+            #REVISIT - Duplicate Code, make it a single method
             ydl_opts = {
                 "format": "worstaudio[ext=m4a]/worst[ext=mp4]/bestaudio/best",
                 "outtmpl": f"{output_template}.%(ext)s",
@@ -133,11 +130,9 @@ class YouTubeParser(BaseContentParser):
                 },
             }
 
-            # Try to use browser cookies if available
             try:
                 ydl_opts["cookiesfrombrowser"] = ("chrome",)
             except:
-                # If browser cookies fail, continue without them
                 pass
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

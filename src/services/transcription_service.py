@@ -8,7 +8,6 @@ import google.generativeai as genai
 
 logger = structlog.get_logger(__name__)
 
-
 class TranscriptionProvider(str, Enum):
     OPENAI = "openai"
     GOOGLE = "google"
@@ -48,7 +47,6 @@ class TranscriptionService:
             raise ValueError(f"All transcription providers failed: {e}")
 
     async def _transcribe_openai(self, audio_path: str, language: str) -> str:
-        """Transcribe using OpenAI Whisper API."""
         import asyncio
 
         def transcribe():
@@ -70,18 +68,15 @@ class TranscriptionService:
         return result
 
     async def _transcribe_google(self, audio_path: str, language: str) -> str:
-        """Transcribe using Google Speech-to-Text."""
         import asyncio
 
         def transcribe():
             if not self.google_client:
                 raise ValueError("Google Speech client not available")
 
-            # Read audio file
             with open(audio_path, "rb") as audio_file:
                 content = audio_file.read()
 
-            # Configure recognition
             config = speech.RecognitionConfig(
                 encoding=speech.RecognitionConfig.AudioEncoding.MP3,
                 sample_rate_hertz=16000,
@@ -89,11 +84,8 @@ class TranscriptionService:
             )
 
             audio = speech.RecognitionAudio(content=content)
-
-            # Perform transcription
             response = self.google_client.recognize(config=config, audio=audio)
 
-            # Extract text
             transcript = ""
             for result in response.results:
                 transcript += result.alternatives[0].transcript + " "
@@ -115,13 +107,10 @@ class TranscriptionService:
             except ImportError:
                 raise ValueError("faster-whisper not installed. Install with: pip install faster-whisper")
 
-            # Initialize model (downloads on first use)
             model = WhisperModel("base", device="cpu", compute_type="int8")
 
-            # Transcribe
             segments, info = model.transcribe(audio_path, language=language)
 
-            # Combine segments
             transcript = " ".join([segment.text for segment in segments])
             return transcript
 
@@ -131,7 +120,6 @@ class TranscriptionService:
         return result
 
     def get_available_providers(self) -> list[TranscriptionProvider]:
-        """Get list of available transcription providers."""
         providers = []
 
         if self.openai_api_key:
@@ -140,9 +128,7 @@ class TranscriptionService:
         if self.google_client and self.google_api_key:
             providers.append(TranscriptionProvider.GOOGLE)
 
-        # Local Whisper always available (if package installed)
         try:
-            import faster_whisper
             providers.append(TranscriptionProvider.LOCAL_WHISPER)
         except ImportError:
             pass
