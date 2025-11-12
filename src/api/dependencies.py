@@ -1,7 +1,7 @@
 from typing import Optional
-from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
+from fastapi import Depends
 
 from ..core.database import get_db
 from ..repositories.content_job_repository import ContentJobRepository
@@ -42,7 +42,6 @@ def get_analytics_service(repo: AnalyticsRepository = Depends(get_analytics_repo
 
 
 def get_analytics_dashboard_service_dep() -> AnalyticsDashboardService:
-    """Get analytics dashboard service dependency."""
     return get_analytics_dashboard_service()
 
 

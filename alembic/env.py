@@ -9,11 +9,11 @@ from alembic import context
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from src.ai_video_tutor.core.database import Base
-from src.ai_video_tutor.core.config import get_settings
+from src.core.database import Base
+from src.config import get_settings
 
 # Import models to register them with Base
-from src.ai_video_tutor.models import job, content
+from src.models import content_job, user, quiz_question, uploaded_file
 
 config = context.config
 settings = get_settings()

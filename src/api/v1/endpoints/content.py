@@ -1,13 +1,12 @@
 import structlog
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Response
-from sqlalchemy.orm import Session
+
+from src.utils import job_utils
 
 from ...dependencies import get_content_job_repository, get_file_storage, get_current_user_optional, get_db
 from ..schemas import (
     ContentProcessingRequest,
-    ProcessingJobResponse,
-    MultiStatusProcessingResponse,
     FileProcessingResult,
     ContentJobResponse,
     ContentResults,
@@ -19,7 +18,6 @@ from ..schemas import (
 )
 from ....config import get_settings
 from ....services.content_processor import content_processor
-from ....services.duplicate_detector import DuplicateDetector
 from ....core.exceptions import JobNotFoundError, ValidationError
 from ....models.user import User
 from ....models.content_job import ContentJob
@@ -31,9 +29,8 @@ router = APIRouter()
 
 
 @router.post("/upload", response_model=FileUploadResponse)
-async def upload_file(
-    file: UploadFile = File(...),
-    file_storage = Depends(get_file_storage)
+async def upload_file(file: UploadFile = File(...),
+file_storage = Depends(get_file_storage)
 ) -> FileUploadResponse:
     try:
         file_id = await file_storage.store_file(file)
@@ -64,24 +61,16 @@ async def process_content(
     request: ContentProcessingRequest,
     response: Response,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    repo = Depends(get_content_job_repository),
+    repo = Depends(get_content_job_repository), #REVISIT - What does this do??
     current_user: Optional[User] = Depends(get_current_user_optional)
 ) -> List[FileProcessingResult]:
-    """
-    Process content with 207 Multi-Status response format for duplicate detection.
-
-    Currently supports single file processing only, but returns array format
-    for future extensibility to multiple files.
-    """
+   
     try:
         results = []
 
-        # Process multimodal input configuration
         user_id = current_user.id if current_user else None
         job = repo.create_job(user_id=user_id)
 
-        # Convert input_config to dict format for storage
         input_config_data = []
         for input_item in request.input_config:
             input_config_data.append({
@@ -97,27 +86,30 @@ async def process_content(
             generate_summary=request.generate_summary,
             llm_provider=request.llm_provider.value
         )
-
-        # Set collection/RAG fields
         job.collection_name = request.collection_name
         job.should_add_to_collection = request.should_add_to_collection
 
+        # Add structured_response to input_config for processing logic
+        job_input_config = job.input_config_dict or {}
+        job_input_config["structured_response"] = request.structured_response
+        job.input_config_dict = job_input_config
+
         repo.update_job(job)
 
-        # Start background processing
         background_tasks.add_task(
             content_processor.process_content_background_sync,
             job.id
         )
 
-        results.append(FileProcessingResult(
-            file_id="multimodal_content",
-            job_id=job.id,
-            status=JobStatus.PENDING,
-            message="Multimodal content processing started successfully",
-            estimated_duration_minutes=5,
-            websocket_url=f"ws://localhost:{settings.api_port}/ws/content/{job.id}"
-        ))
+
+        #REVISIT - response should be list of indivual files. 
+        for data in input_config_data:
+            results.append(FileProcessingResult(
+                file_id=data["id"],
+                job_id=job.id,
+                status=JobStatus.PENDING,
+                message="File processing started successfully"
+            ))
 
         logger.info(
             "Multimodal content processing job created",
@@ -126,13 +118,12 @@ async def process_content(
             question_types=[qt.value for qt in request.question_types]
         )
 
-        # Set appropriate HTTP status code
         if any(result.status == JobStatus.FAILED for result in results):
-            response.status_code = 207  # Multi-Status (some failed)
+            response.status_code = 207
         elif any(result.status in [JobStatus.PROCESSING, JobStatus.COMPLETED] and result.job_id for result in results):
-            response.status_code = 207  # Multi-Status (some duplicates)
+            response.status_code = 207
         else:
-            response.status_code = 207  # Multi-Status (for consistency)
+            response.status_code = 207
 
         return results
 
@@ -153,7 +144,7 @@ async def get_job_status(
     try:
         job = repo.get(job_id)
         if not job:
-            raise JobNotFoundError(job_id)
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
         return ContentJobResponse(
             id=job.id,
@@ -167,8 +158,8 @@ async def get_job_status(
             file_ids=job.file_ids
         )
 
-    except JobNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to get job status", job_id=job_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to retrieve job status")
@@ -180,15 +171,7 @@ async def get_job_results(
     repo = Depends(get_content_job_repository)
 ) -> ContentResults:
     try:
-        job = repo.get(job_id)
-        if not job:
-            raise JobNotFoundError(job_id)
-
-        if job.status != "completed":
-            raise HTTPException(
-                status_code=409,
-                detail=f"Job not complete. Current status: {job.status}"
-            )
+        job = job_utils.check_job_exists(job_id, repo)
 
         processing_duration = None
         if job.completed_at and job.created_at:
@@ -221,16 +204,7 @@ async def get_job_summary(
     repo = Depends(get_content_job_repository)
 ) -> SummaryResponse:
     try:
-        job = repo.get(job_id)
-        if not job:
-            raise JobNotFoundError(job_id)
-
-        if job.status != "completed":
-            raise HTTPException(
-                status_code=409,
-                detail=f"Job not complete. Current status: {job.status}"
-            )
-
+        job = job_utils.check_job_exists(job_id, repo)
         return SummaryResponse(summary=job.summary)
 
     except JobNotFoundError as e:
@@ -248,16 +222,7 @@ async def get_job_content(
     repo = Depends(get_content_job_repository)
 ) -> ContentTextResponse:
     try:
-        job = repo.get(job_id)
-        if not job:
-            raise JobNotFoundError(job_id)
-
-        if job.status != "completed":
-            raise HTTPException(
-                status_code=409,
-                detail=f"Job not complete. Current status: {job.status}"
-            )
-
+        job = job_utils.check_job_exists(job_id, repo)
         return ContentTextResponse(content_text=job.content_text)
 
     except JobNotFoundError as e:
@@ -284,6 +249,7 @@ async def get_jobs_list(
             jobs = repo.get_all_jobs(limit=limit, offset=offset)
             total_count = repo.get_total_jobs_count()
 
+        #REVISIT - Can we apply DRY principle here?
         job_responses = []
         for job in jobs:
             job_responses.append(ContentJobResponse(
@@ -340,3 +306,4 @@ async def get_supported_types():
         "supported_extensions": [".pdf", ".docx", ".doc"],
         "url_support": ["YouTube videos", "Web pages (HTML content)"]
     }
+

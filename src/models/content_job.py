@@ -8,14 +8,6 @@ import enum
 from ..core.database import Base
 
 
-class JobStatus(enum.Enum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
 class ContentJob(Base):
     __tablename__ = "content_jobs"
 

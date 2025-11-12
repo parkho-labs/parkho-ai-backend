@@ -5,6 +5,7 @@ from typing import Dict, Any, List
 import openai
 
 from .base import ContentTutorAgent
+from .prompts import ContentAnalysisPrompts
 from ..config import get_settings
 from ..models.content_job import ContentJob
 from ..core.database import SessionLocal
@@ -41,7 +42,6 @@ class ContentAnalyzerAgent(ContentTutorAgent):
 
         try:
             await self.update_job_progress(job_id, 60.0, "Analyzing content structure")
-
             chunks = self.split_transcript(transcript)
             content_analysis = await self.analyze_content_structure(chunks, video_metadata)
             key_concepts = await self.extract_key_concepts(transcript, video_metadata)
@@ -70,35 +70,38 @@ class ContentAnalyzerAgent(ContentTutorAgent):
             raise
 
     def split_transcript(self, transcript: str) -> List[str]:
-        chunks = []
-        start = 0
         text_length = len(transcript)
+        boundaries = self._calculate_chunk_boundaries(transcript, text_length)
 
-        while start < text_length:
-            end = start + self.chunk_size
-            if end < text_length:
-                chunk = transcript[start:end]
-                last_space = chunk.rfind(' ')
-                if last_space > 0:
-                    end = start + last_space
-
-            chunk = transcript[start:end]
-            chunks.append(chunk)
-            start = end - self.chunk_overlap
+        chunks = []
+        for start, end in boundaries:
+            chunks.append(transcript[start:end])
 
         return chunks
 
+    def _calculate_chunk_boundaries(self, transcript: str, text_length: int) -> List[tuple[int, int]]:
+        boundaries = []
+        start = 0
+
+        while start < text_length:
+            end = min(start + self.chunk_size, text_length)
+
+            if end < text_length:
+                end = self._find_word_boundary(transcript, start, end)
+
+            boundaries.append((start, end))
+            start = end - self.chunk_overlap
+
+        return boundaries
+
+    def _find_word_boundary(self, text: str, start: int, proposed_end: int) -> int:
+        chunk = text[start:proposed_end]
+        last_space = chunk.rfind(' ')
+        return start + last_space if last_space > 0 else proposed_end
+
     async def analyze_content_structure(self, chunks: List[str], video_metadata: Dict[str, Any]) -> Dict[str, Any]:
         full_text = " ".join(chunks[:5])
-
-        system_prompt = """Analyze the following video transcript and return a JSON object with:
-- main_topics: List of 3-5 main topics covered
-- content_type: Type of content (lecture, tutorial, discussion, etc.)
-- difficulty_level: beginner, intermediate, or advanced
-- structure: brief description of how content is organized
-- learning_objectives: 3-5 key learning objectives
-
-Return only valid JSON, no additional text."""
+        system_prompt = ContentAnalysisPrompts.get_analysis_prompt()
 
         user_content = f"Video Title: {video_metadata.get('title', 'Unknown')}\n\nTranscript: {full_text[:3000]}"
 
@@ -117,7 +120,6 @@ Return only valid JSON, no additional text."""
             return self._get_fallback_analysis()
 
     def _get_fallback_analysis(self) -> Dict[str, Any]:
-        """Return fallback analysis when all providers fail."""
         return {
             "main_topics": ["Content analysis failed"],
             "content_type": "unknown",
@@ -127,13 +129,7 @@ Return only valid JSON, no additional text."""
         }
 
     async def extract_key_concepts(self, transcript: str, video_metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
-        system_prompt = """Extract key concepts from the transcript and return a JSON array where each concept has:
-- concept: the concept name
-- definition: brief definition or explanation
-- importance: why this concept is important (1 sentence)
-- context: where in the content this appears
-
-Extract 5-10 key concepts maximum. Return only valid JSON array, no additional text."""
+        system_prompt = ContentAnalysisPrompts.get_key_concepts_prompt()
 
         user_content = f"Video Title: {video_metadata.get('title', 'Unknown')}\n\nTranscript: {transcript[:4000]}"
 
@@ -158,12 +154,7 @@ Extract 5-10 key concepts maximum. Return only valid JSON array, no additional t
             return []
 
     async def generate_summary(self, transcript: str, content_analysis: Dict[str, Any]) -> str:
-        system_prompt = """Create a comprehensive summary of the video content with:
-        1. Executive summary (2-3 sentences)
-        2. Key points covered (bullet points)
-        3. Main takeaways
-
-        Return as clean text, not JSON."""
+        system_prompt = ContentAnalysisPrompts.get_summary_prompt()
 
         main_topics = content_analysis.get('main_topics', [])
         topics_text = ", ".join(main_topics) if main_topics else "various topics"
@@ -198,5 +189,3 @@ Extract 5-10 key concepts maximum. Return only valid JSON array, no additional t
             raise
         finally:
             db.close()
-
-# Test Concluded

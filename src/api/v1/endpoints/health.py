@@ -15,6 +15,7 @@ settings = get_settings()
 router = APIRouter()
 
 
+#REVISIT - Halth check shouldn't be this complex
 @router.get("/health")
 async def health_check(
     db: Session = Depends(get_db)

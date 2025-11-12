@@ -8,6 +8,7 @@ from pathlib import Path
 from ..repositories.file_repository import FileRepository
 from ..models.uploaded_file import UploadedFile
 from ..config import get_settings
+from ..api.v1.schemas import StandardAPIResponse
 
 settings = get_settings()
 
@@ -24,6 +25,9 @@ class FileStorageService:
             "doc": 5 * 1024 * 1024,    # 5MB
         }
         self.allowed_extensions = {".pdf", ".docx", ".doc"}
+
+    def create_validation_error(self, message: str, error_code: str = "VALIDATION_ERROR") -> StandardAPIResponse:
+        return StandardAPIResponse.error(message=message, error_code=error_code)
 
     def validate_file(self, file: UploadFile) -> tuple[bool, Optional[str]]:
         if not file.filename:
@@ -59,17 +63,6 @@ class FileStorageService:
             with open(file_path, "wb") as stored_file:
                 shutil.copyfileobj(file.file, stored_file)
 
-            file_size = file_path.stat().st_size
-
-            uploaded_file = self.file_repo.create_file(
-                file_id=file_id,
-                filename=file.filename,
-                file_path=str(file_path),
-                file_size=file_size,
-                content_type=file.content_type,
-                ttl_hours=ttl_hours
-            )
-
             return file_id
 
         except Exception as e:
@@ -82,15 +75,7 @@ class FileStorageService:
         if uploaded_file and os.path.exists(uploaded_file.file_path):
             return uploaded_file.file_path
         return None
-
-    def get_file_paths(self, file_ids: List[str]) -> List[str]:
-        uploaded_files = self.file_repo.get_multiple(file_ids)
-        paths = []
-        for uploaded_file in uploaded_files:
-            if os.path.exists(uploaded_file.file_path):
-                paths.append(uploaded_file.file_path)
-        return paths
-
+        
     def get_file_metadata(self, file_id: str) -> Optional[UploadedFile]:
         return self.file_repo.get(file_id)
 
