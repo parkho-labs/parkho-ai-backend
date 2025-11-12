@@ -89,6 +89,11 @@ async def process_content(
         job.collection_name = request.collection_name
         job.should_add_to_collection = request.should_add_to_collection
 
+        # Add structured_response to input_config for processing logic
+        job_input_config = job.input_config_dict or {}
+        job_input_config["structured_response"] = request.structured_response
+        job.input_config_dict = job_input_config
+
         repo.update_job(job)
 
         background_tasks.add_task(

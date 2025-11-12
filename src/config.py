@@ -78,6 +78,25 @@ class Settings(BaseSettings):
     google_studio_content_report_id: str = Field(default="", description="Google Data Studio content analytics report ID")
     google_studio_user_report_id: str = Field(default="", description="Google Data Studio user insights report ID")
 
+    # Question Generation Settings
+    structured_response_default: bool = Field(default=True, description="Default value for structured response generation")
+    max_questions_per_request: int = Field(default=20, description="Maximum questions allowed per request")
+    default_question_score: int = Field(default=1, description="Default score per question")
+    default_question_time: int = Field(default=60, description="Default time per question in seconds")
+    physics_tutor_enabled: bool = Field(default=True, description="Enable physics tutor agent")
+    question_enhancement_enabled: bool = Field(default=True, description="Enable question enhancement service")
+
+    # RAG Intelligence Settings
+    rag_intelligence_enabled: bool = Field(default=True, description="Enable intelligent RAG query processing")
+    question_extraction_threshold: float = Field(default=0.8, description="Confidence threshold for direct question extraction")
+    enable_cost_optimization: bool = Field(default=True, description="Enable cost optimization features (direct extraction)")
+    jee_advanced_mode: bool = Field(default=True, description="Enable JEE Advanced specific features")
+
+    # LLM Question Generation
+    question_generation_temperature: float = Field(default=0.7, description="LLM temperature for question generation")
+    question_generation_max_tokens: int = Field(default=10000, description="Max tokens for question generation")
+    preferred_question_provider: str = Field(default="openai", description="Preferred LLM provider for questions")
+
     class Config:
         env_file = [".env.local", ".env"]
         env_file_encoding = "utf-8"

@@ -83,6 +83,7 @@ class ContentProcessingRequest(BaseModel):
     llm_provider: LLMProvider = Field(default=LLMProvider.OPENAI)
     collection_name: Optional[str] = Field(default=None, description="Collection to use for RAG context")
     should_add_to_collection: bool = Field(default=False, description="Whether to add processed content to the collection")
+    structured_response: bool = Field(default=True, description="Enable structured JSON response for question generation")
 
     class Config:
         json_schema_extra = {
@@ -97,7 +98,8 @@ class ContentProcessingRequest(BaseModel):
                 "generate_summary": True,
                 "llm_provider": "openai",
                 "collection_name": "physics_course",
-                "should_add_to_collection": True
+                "should_add_to_collection": True,
+                "structured_response": True
             }
         }
 

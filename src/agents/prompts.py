@@ -144,12 +144,102 @@ Focus on educational value and clarity."""
 Ensure questions test understanding, not just memorization."""
 
 
-class SystemPrompts:
-    """System-wide prompts and templates"""
+class PhysicsTeacherPrompts:
+    """Physics teacher specific prompts for educational content generation"""
 
     @staticmethod
+    def get_system_message() -> str:
+        """System message for physics teacher persona"""
+        return """You are an experienced physics teacher with advanced expertise who helps students prepare for examinations. You have deep knowledge of physics concepts and excel at creating educational content including detailed explanations, practice questions, MCQs, and examination materials. Always provide comprehensive, accurate, and pedagogically sound responses."""
+
+    @staticmethod
+    def get_text_response_template(context: str, query: str) -> str:
+        """Template for standard text responses"""
+        return f"""You are an experienced physics teacher with advanced expertise who helps students prepare for examinations. You have deep knowledge of physics concepts and can create educational content including questions, explanations, and practice materials.
+
+Based on the following physics content, respond to the student's request. Whether they ask for explanations, practice questions, MCQs, or any other educational assistance, provide comprehensive and accurate help.
+
+Physics Content:
+{context}
+
+Student Request: {query}
+
+Your Response:"""
+
+    @staticmethod
+    def get_educational_json_template(context: str, query: str) -> str:
+        """Template for educational JSON generation"""
+        return f"""You are an experienced physics teacher creating educational content. Generate structured educational material in valid JSON format.
+
+Physics Content:
+{context}
+
+Student Request: {query}
+
+Respond with valid JSON only:
+{{
+    "questions": [
+        {{
+            "question_text": "Complete question text here",
+            "options": ["Option A text", "Option B text", "Option C text", "Option D text"],
+            "correct_answer": "Option B text",
+            "explanation": "Detailed explanation why this is correct",
+            "requires_diagram": true,
+            "contains_math": true,
+            "diagram_type": "pulley_system",
+            "source_reference": "Chapter X, Page Y"
+        }}
+    ]
+}}
+
+Important:
+- Generate exactly the number of questions requested
+- For diagram_type use: "pulley_system", "inclined_plane", "force_diagram", "circuit", or null
+- Set requires_diagram to true only if essential for understanding
+- Set contains_math to true if equations/formulas are present
+- Include source_reference if content has page/chapter information
+- Ensure JSON is valid and complete"""
+
+    @staticmethod
+    def get_jee_advanced_template(context: str, query: str, difficulty_level: str = "advanced") -> str:
+        return f"""You are an expert physics teacher specializing in JEE Advanced preparation. Create challenging, conceptual questions that test deep understanding and problem-solving skills.
+
+Physics Content:
+{context}
+
+Student Request: {query}
+Difficulty Level: {difficulty_level}
+
+Generate JEE Advanced level questions in valid JSON format:
+{{
+    "questions": [
+        {{
+            "question_text": "Challenging conceptual question with numerical components",
+            "options": ["Precise option A", "Precise option B", "Precise option C", "Precise option D"],
+            "correct_answer": "Precise option B",
+            "explanation": "Detailed step-by-step solution with physics principles",
+            "requires_diagram": true,
+            "contains_math": true,
+            "diagram_type": "force_diagram",
+            "source_reference": "Advanced Physics Topic",
+            "jee_topic": "Mechanics/Thermodynamics/Electromagnetism/Modern Physics",
+            "complexity_level": "{difficulty_level}"
+        }}
+    ]
+}}
+
+JEE Advanced Requirements:
+- Questions must test conceptual understanding, not just formula application
+- Include multi-step problem solving
+- Use precise numerical values and units
+- Focus on real-world applications and limiting cases
+- Ensure questions require analytical thinking
+- Include cross-topic connections when applicable"""
+
+
+class SystemPrompts:
+    @staticmethod
     def get_error_handling_prompt() -> str:
-        """Prompt for handling content processing errors"""
         return """An error occurred during content processing. Analyze the issue and provide:
 
 1. error_type: Classification of the error
