@@ -20,7 +20,7 @@ class TokenVerificationResponse(BaseModel):
     name: Optional[str] = None
 
 class UserResponse(BaseModel):
-    id: int
+    user_id: str
     email: str
     full_name: str
     date_of_birth: Optional[str] = None
@@ -68,20 +68,35 @@ async def create_user(
     if not firebase_uid or not email:
         raise HTTPException(status_code=401, detail="Invalid token data")
 
-    user = get_or_create_user(
-        db=db,
-        firebase_uid=firebase_uid,
-        email=email,
-        full_name=request.full_name,
-        date_of_birth=request.date_of_birth
-    )
+    try:
+        user = await get_or_create_user(
+            db=db,
+            firebase_uid=firebase_uid,
+            email=email,
+            full_name=request.full_name,
+            date_of_birth=request.date_of_birth
+        )
 
-    return UserResponse(
-        id=user.id,
-        email=user.email,
-        full_name=user.full_name,
-        date_of_birth=str(user.date_of_birth) if user.date_of_birth else None
-    )
+        return UserResponse(
+            user_id=user.user_id,
+            email=user.email,
+            full_name=user.full_name,
+            date_of_birth=str(user.date_of_birth) if user.date_of_birth else None
+        )
+
+    except Exception as e:
+        # Handle RAG engine registration failures and other errors
+        error_message = str(e)
+        if "RAG registration failed" in error_message:
+            raise HTTPException(
+                status_code=503,
+                detail=f"User registration failed due to external service error: {error_message}"
+            )
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create user: {error_message}"
+            )
 
 @router.get("/me", response_model=Optional[UserResponse])
 async def get_current_user(
@@ -91,7 +106,7 @@ async def get_current_user(
         return None
 
     return UserResponse(
-        id=current_user.id,
+        user_id=current_user.user_id,
         email=current_user.email,
         full_name=current_user.full_name,
         date_of_birth=str(current_user.date_of_birth) if current_user.date_of_birth else None

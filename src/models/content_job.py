@@ -12,7 +12,7 @@ class ContentJob(Base):
     __tablename__ = "content_jobs"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    user_id = Column(String, ForeignKey("users.user_id"), nullable=True)
 
     status = Column(String, nullable=False, default="pending")
     progress = Column(Float, nullable=False, default=0.0)

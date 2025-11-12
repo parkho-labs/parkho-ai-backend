@@ -68,7 +68,7 @@ async def process_content(
     try:
         results = []
 
-        user_id = current_user.id if current_user else None
+        user_id = current_user.user_id if current_user else None
         job = repo.create_job(user_id=user_id)
 
         input_config_data = []
@@ -243,8 +243,8 @@ async def get_jobs_list(
 ) -> ContentJobsListResponse:
     try:
         if current_user:
-            jobs = repo.get_jobs_by_user(current_user.id, limit=limit, offset=offset)
-            total_count = repo.session.query(ContentJob).filter(ContentJob.user_id == current_user.id).count()
+            jobs = repo.get_jobs_by_user(current_user.user_id, limit=limit, offset=offset)
+            total_count = repo.session.query(ContentJob).filter(ContentJob.user_id == current_user.user_id).count()
         else:
             jobs = repo.get_all_jobs(limit=limit, offset=offset)
             total_count = repo.get_total_jobs_count()

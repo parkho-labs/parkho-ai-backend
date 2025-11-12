@@ -8,7 +8,7 @@ class UserEvent(Base):
     __tablename__ = "user_events"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.user_id"), nullable=False, index=True)
     session_id = Column(String(50), nullable=True)
     event_name = Column(String(100), nullable=False, index=True)
     properties = Column(JSON, nullable=True)

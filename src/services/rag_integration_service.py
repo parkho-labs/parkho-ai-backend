@@ -14,7 +14,46 @@ class RAGIntegrationService:
     async def close(self):
         await self.client.aclose()
 
-    
+    async def register_user(self, user_id: str, email: str = None, name: str = None) -> bool:
+        """
+        Register a user with the RAG engine.
+
+        Args:
+            user_id: Firebase UID to use as the user identifier
+            email: User's email address
+            name: User's full name
+
+        Returns:
+            bool: True if registration successful, False otherwise
+
+        Raises:
+            Exception: If registration fails, allowing caller to handle appropriately
+        """
+        try:
+            payload = {
+                "user_id": user_id,
+                "email": email or f"{user_id}@example.com",
+                "name": name or f"User {user_id}"
+            }
+            response = await self.client.post(f"{self.base_url}/users/register", json=payload)
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get('status') == 'SUCCESS':
+                logger.info(f"Successfully registered user {user_id} with RAG engine")
+                return True
+            else:
+                logger.error(f"RAG engine registration failed for user {user_id}: {data.get('message', 'Unknown error')}")
+                raise Exception(f"RAG registration failed: {data.get('message', 'Unknown error')}")
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error during RAG user registration for {user_id}: {e}")
+            raise Exception(f"RAG registration HTTP error: {e.response.status_code}")
+        except Exception as e:
+            logger.error(f"Failed to register user {user_id} with RAG engine: {e}")
+            raise Exception(f"RAG registration failed: {str(e)}")
+
+
     async def upload_file(self, file_content: bytes, filename: str) -> Optional[str]:
         try:
             files = {"file": (filename, file_content, "application/octet-stream")}
