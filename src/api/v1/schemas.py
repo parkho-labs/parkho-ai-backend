@@ -66,7 +66,7 @@ class InputType(str, Enum):
     PDF = "pdf"
     DOCX = "docx"
     WEB_URL = "web_url"
-    RAG = "rag"
+    COLLECTION = "collection"
 
 
 class ContentInput(BaseModel):

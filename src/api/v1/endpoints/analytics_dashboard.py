@@ -30,7 +30,7 @@ async def get_dashboard_url(
 
         effective_user_id = user_id
         if not effective_user_id and current_user:
-            effective_user_id = current_user.id
+            effective_user_id = current_user.user_id
 
         result = service.get_dashboard_url(
             dashboard_type=dashboard_type,

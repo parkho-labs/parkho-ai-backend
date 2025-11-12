@@ -99,7 +99,7 @@ app = create_application()
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     uvicorn.run(
         "src.main:app",
         host=settings.api_host,
