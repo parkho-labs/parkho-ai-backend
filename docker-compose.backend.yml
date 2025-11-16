@@ -1,0 +1,31 @@
+services:
+  parkho-ai-backend:
+    build:
+      context: /Users/nakuljn/Documents/Github/parkho-labs/parkho-ai-backend
+      dockerfile: Dockerfile
+    container_name: parkho-ai-backend
+    env_file:
+      - /Users/nakuljn/Documents/Github/parkho-labs/parkho-ai-backend/.env.docker
+    secrets:
+      - firebase_service_account
+    volumes:
+      - backend_uploads:/app/uploaded_files
+      - backend_tmp:/tmp/ai_video_tutor
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    networks:
+      - rag-network
+
+volumes:
+  backend_uploads:
+  backend_tmp:
+
+secrets:
+  firebase_service_account:
+    file: /Users/nakuljn/Documents/Github/parkho-labs/parkho-ai-backend/parkhoai-864b2-firebase-adminsdk-fbsvc-f3da414502.json
+
+networks:
+  rag-network:
+    external: true
+

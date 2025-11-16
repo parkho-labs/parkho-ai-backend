@@ -52,6 +52,20 @@ python -m uvicorn src.main:app --host 127.0.0.1 --port 8080
 - API Documentation: http://localhost:8000/docs
 - Health Check: http://localhost:8000/api/v1/health
 
+### Docker (Backend Only)
+1. Copy the example env file and fill in secrets:
+   ```bash
+   cp env.docker.example .env.docker
+   ```
+2. Update `DATABASE_URL`, API keys, and Firebase paths to point at the services you already run (e.g., Postgres + MinIO).
+3. Build and start the container so it appears in `docker ps`:
+   ```bash
+   docker compose -f docker-compose.backend.yml up -d --build
+   ```
+4. Verify:
+   - `docker ps` should list `parkho-ai-backend`
+   - API Docs: http://localhost:8080/docs
+
 ## 🏗️ Architecture
 
 ### Design Philosophy
@@ -326,6 +340,9 @@ FIREBASE_PROJECT_ID=your-firebase-project-id
 MAX_VIDEO_LENGTH_MINUTES=60
 MAX_CONCURRENT_JOBS=5
 JOB_TIMEOUT_MINUTES=10
+
+# CORS
+CORS_ALLOWED_ORIGINS=https://parkho-ai-frontend-ku7bn6e62q-uc.a.run.app,http://localhost:5173,http://localhost:3000
 ```
 
 ### Production Setup

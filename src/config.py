@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
@@ -41,13 +41,15 @@ class Settings(BaseSettings):
     
     secret_key: str = Field(default="test_secret_key_change_in_production", description="Secret key for session management")
     allowed_origins: list[str] = Field(
-        default=[
+        default_factory=lambda: [
             "http://localhost:3000",
             "http://localhost:3001",
             "http://localhost:5173",
-            "https://parkho-ai-frontend-846780462763.us-central1.run.app"
+            "https://parkho-ai-frontend-ku7bn6e62q-uc.a.run.app",
+            "https://parkho-ai-frontend-846780462763.us-central1.run.app",
         ],
-        description="Allowed CORS origins"
+        description="Allowed CORS origins",
+        validation_alias=AliasChoices("CORS_ALLOWED_ORIGINS", "ALLOWED_ORIGINS"),
     )
     
     log_level: str = Field(default="INFO", description="Logging level")
@@ -105,6 +107,15 @@ class Settings(BaseSettings):
     # Demo Mode Configuration
     demo_mode: bool = Field(default=False, description="Enable demo mode for development")
     demo_user_id: str = Field(default="demo-user-123", description="Default demo user ID")
+
+    @field_validator("allowed_origins", mode="before")
+    @classmethod
+    def parse_allowed_origins(cls, value):
+        if value is None:
+            return value
+        if isinstance(value, str):
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
 
     class Config:
         env_file = [".env.local", ".env"]
