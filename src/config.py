@@ -47,6 +47,7 @@ class Settings(BaseSettings):
             "http://localhost:5173",
             "https://parkho-ai-frontend-ku7bn6e62q-uc.a.run.app",
             "https://parkho-ai-frontend-846780462763.us-central1.run.app",
+            "http://3.107.3.42:3000"
         ],
         description="Allowed CORS origins",
         validation_alias=AliasChoices("CORS_ALLOWED_ORIGINS", "ALLOWED_ORIGINS"),
