@@ -137,6 +137,66 @@ async def get_current_user_optional(
         return None
 
 
+async def get_or_create_anonymous_user(db: Session) -> User:
+    """Create or return an anonymous user for when authentication is disabled"""
+    anonymous_user_id = "anonymous-user"
+
+    existing_user = db.query(User).filter(User.user_id == anonymous_user_id).first()
+    if existing_user:
+        return existing_user
+
+    anonymous_user = User(
+        user_id=anonymous_user_id,
+        firebase_uid="anonymous",
+        email="anonymous@example.com",
+        full_name="Anonymous User"
+    )
+    db.add(anonymous_user)
+    db.commit()
+    db.refresh(anonymous_user)
+    return anonymous_user
+
+
+async def get_current_user_conditional(
+    request: Request,
+    db: Session = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> User:
+    """
+    Conditional authentication dependency that enforces auth based on settings.
+    - If authentication_enabled=True: requires valid auth (like get_current_user_required)
+    - If authentication_enabled=False: returns anonymous user without requiring auth
+    """
+    settings = get_settings()
+
+    if not settings.authentication_enabled:
+        # Auth disabled - return anonymous user
+        return await get_or_create_anonymous_user(db)
+
+    # Auth enabled - use existing required auth logic
+    return await get_current_user_required(request, db, credentials)
+
+
+async def get_current_user_optional_conditional(
+    request: Request,
+    db: Session = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> Optional[User]:
+    """
+    Conditional optional authentication dependency.
+    - If authentication_enabled=True: behaves like get_current_user_optional
+    - If authentication_enabled=False: returns anonymous user (never None)
+    """
+    settings = get_settings()
+
+    if not settings.authentication_enabled:
+        # Auth disabled - return anonymous user
+        return await get_or_create_anonymous_user(db)
+
+    # Auth enabled - use existing optional auth logic
+    return await get_current_user_optional(request, db, credentials)
+
+
 # Legacy dependencies for backward compatibility during transition
 def get_video_job_repository(db: Session = Depends(get_db)):
     # Temporary redirect to content job repository

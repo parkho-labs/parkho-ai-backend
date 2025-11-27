@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 
 from ....services.analytics_dashboard_service import AnalyticsDashboardService
 from ....services.analytics.base_provider import DashboardType
-from ...dependencies import get_current_user_optional, get_analytics_dashboard_service_dep
+from ...dependencies import get_current_user_optional, get_current_user_optional_conditional, get_analytics_dashboard_service_dep
 from ....models.user import User
 
 logger = structlog.get_logger(__name__)
@@ -18,7 +18,7 @@ async def get_dashboard_url(
     user_id: Optional[int] = Query(None, description="User ID for user-specific dashboards"),
     filters: Optional[str] = Query(None, description="Additional filters as JSON string"),
     service: AnalyticsDashboardService = Depends(get_analytics_dashboard_service_dep),
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user: Optional[User] = Depends(get_current_user_optional_conditional)
 ) -> Dict[str, Any]:
     try:
         parsed_filters = {}

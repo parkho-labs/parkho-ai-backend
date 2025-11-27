@@ -240,3 +240,94 @@ class LLMService:
                                 continue
 
             return [] if '[' in response else {}
+
+    async def generate_video_content(
+        self,
+        video_url: str,
+        prompt: str,
+        model_name: str = "gemini-1.5-pro",
+        temperature: float = 0.7,
+        max_tokens: int = 4000
+    ) -> str:
+        """
+        Generate content analysis for video using Google Gemini's video understanding API.
+
+        Args:
+            video_url: YouTube URL to analyze
+            prompt: Analysis prompt for the video
+            model_name: Gemini model to use (should support video)
+            temperature: Generation temperature
+            max_tokens: Maximum tokens to generate
+
+        Returns:
+            Generated analysis response
+
+        Raises:
+            ValueError: If Gemini is not available or video processing fails
+        """
+        if not self.google_client:
+            raise ValueError("Google Gemini client not available. Check API key.")
+
+        try:
+            logger.info("Starting Gemini video analysis", video_url=video_url, model=model_name)
+
+            # Configure generation parameters for video analysis
+            generation_config = genai.types.GenerationConfig(
+                temperature=temperature,
+                max_output_tokens=max_tokens
+            )
+
+            # Create model instance with video capabilities
+            video_model = genai.GenerativeModel(model_name)
+
+            # For video analysis, we need to provide the video URL directly
+            # Gemini can analyze YouTube videos by URL
+            full_prompt = f"""
+Analyze the YouTube video at: {video_url}
+
+{prompt}
+
+Please provide a thorough analysis based on the video content.
+"""
+
+            response = video_model.generate_content(
+                full_prompt,
+                generation_config=generation_config
+            )
+
+            result = response.text
+            logger.info(
+                "Gemini video analysis completed",
+                response_length=len(result),
+                video_url=video_url
+            )
+            return result
+
+        except Exception as e:
+            error_msg = f"Gemini video analysis failed: {str(e)}"
+            logger.error(
+                "Video analysis error",
+                video_url=video_url,
+                error=error_msg,
+                exc_info=True
+            )
+            raise ValueError(error_msg)
+
+    def supports_video_analysis(self) -> bool:
+        """
+        Check if the service supports video analysis.
+
+        Returns:
+            True if Google Gemini with video capabilities is available
+        """
+        return self.google_client is not None and self.google_api_key is not None
+
+    def get_video_model_name(self) -> str:
+        """
+        Get the recommended model name for video analysis.
+
+        Returns:
+            Model name string for video processing
+        """
+        # Use Pro model for video analysis as it has better video understanding
+        return "gemini-1.5-pro"

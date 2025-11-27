@@ -26,8 +26,8 @@ class ContentProcessorService:
             self.rag_service = None
 
     def process_content_background_sync(self, job_id: int):
-        # TEMP DEBUG: Run in main thread to see logs clearly
-        logger.info("=== CONTENT PROCESSOR START (MAIN THREAD DEBUG MODE) ===")
+        """Synchronous wrapper for async content processing that can be run in thread pool."""
+        logger.info("=== CONTENT PROCESSOR START ===")
         logger.info("Content processing started", job_id=job_id)
 
         async def run_async():
@@ -39,20 +39,19 @@ class ContentProcessorService:
                 logger.error("Content processing failed", job_id=job_id, error=str(e), exc_info=True)
                 raise
 
-        # Run directly in main thread for debugging
-        import asyncio
+        # Always create a new event loop in the thread since we're running in ThreadPoolExecutor
         try:
-            loop = asyncio.get_event_loop()
-            logger.info(f"Found existing event loop, running task for job {job_id}")
-            # Run the coroutine and wait for completion
-            task = asyncio.ensure_future(run_async())
-            # This will block until the task completes
-            loop.run_until_complete(task)
-            logger.info(f"Task completed for job {job_id}")
-        except RuntimeError:
-            # If no event loop in current thread, create new one
-            logger.info(f"No event loop found, creating new one for job {job_id}")
-            asyncio.run(run_async())
+            # This ensures we have a clean event loop in the thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(run_async())
+                logger.info(f"Task completed successfully for job {job_id}")
+            finally:
+                loop.close()
+        except Exception as e:
+            logger.error(f"Failed to execute async task for job {job_id}: {e}")
+            raise
 
     async def process_content_background(self, job_id: int):
         if job_id in self.running_jobs:

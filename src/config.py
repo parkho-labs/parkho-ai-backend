@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     api_host: str = Field(default="localhost", description="API host")
     api_port: int = Field(default=8000, description="API port")
     debug: bool = Field(default=False, description="Debug mode")
+
+    # Authentication Configuration
+    authentication_enabled: bool = Field(default=True, description="Enable authentication for all API endpoints")
     
     database_url: str = Field(
         default="sqlite:///./test.db",
@@ -109,6 +112,48 @@ class Settings(BaseSettings):
     demo_mode: bool = Field(default=False, description="Enable demo mode for development")
     demo_user_id: str = Field(default="demo-user-123", description="Default demo user ID")
 
+    # Content Processing Strategy Configuration
+    content_processing_strategy: str = Field(
+        default="auto",
+        description="Content processing strategy: auto, complex_pipeline, direct_gemini"
+    )
+    enable_strategy_fallback: bool = Field(
+        default=True,
+        description="Enable fallback to alternative strategy on failure"
+    )
+    max_pipeline_failures: int = Field(
+        default=2,
+        description="Maximum failures before switching strategy"
+    )
+    strategy_fallback_timeout_minutes: int = Field(
+        default=5,
+        description="Timeout before trying fallback strategy"
+    )
+
+    # Gemini Video API Configuration
+    gemini_video_api_enabled: bool = Field(
+        default=True,
+        description="Enable Google Gemini video understanding API"
+    )
+    gemini_video_model_name: str = Field(
+        default="gemini-1.5-pro",
+        description="Gemini model for video processing"
+    )
+    gemini_video_timeout_seconds: int = Field(
+        default=180,
+        description="Timeout for Gemini video API calls"
+    )
+
+    # Strategy Performance Settings
+    complex_pipeline_timeout_minutes: int = Field(
+        default=10,
+        description="Timeout for complex pipeline strategy"
+    )
+    direct_gemini_timeout_minutes: int = Field(
+        default=3,
+        description="Timeout for direct Gemini strategy"
+    )
+
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def parse_allowed_origins(cls, value):
@@ -119,7 +164,7 @@ class Settings(BaseSettings):
         return value
 
     class Config:
-        env_file = [".env.local", ".env"]
+        env_file = [".env", ".env.local"]  # .env.local takes precedence over .env
         env_file_encoding = "utf-8"
         extra = "ignore"
 
