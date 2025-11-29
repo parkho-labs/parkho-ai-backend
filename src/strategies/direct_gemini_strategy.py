@@ -13,6 +13,7 @@ from typing import Dict, Any, List
 from .base_strategy import ContentProcessingStrategy, ProcessingResult, ProcessingStatus
 from ..core.database import get_db
 from ..repositories.content_job_repository import ContentJobRepository
+from ..api.v1.schemas import JobStatus
 from ..core.websocket_manager import websocket_manager
 
 logger = structlog.get_logger(__name__)
@@ -56,7 +57,7 @@ class DirectGeminiStrategy(ContentProcessingStrategy):
             db_session = next(get_db())
             try:
                 repo = ContentJobRepository(db_session)
-                job = repo.get_by_id(job_id)
+                job = repo.get(job_id)
 
                 if not job:
                     return ProcessingResult(
@@ -350,7 +351,7 @@ Focus on creating high-quality educational content that helps learners understan
         job_id: int,
         progress: int,
         message: str,
-        status: str = "processing"
+        status: str = JobStatus.RUNNING
     ):
         """Update job progress and broadcast via WebSocket."""
         db_session = next(get_db())

@@ -1,4 +1,5 @@
 import json
+import time
 from typing import Dict, Any, List
 import structlog
 
@@ -43,10 +44,14 @@ class QuestionGeneratorAgent(ContentTutorAgent):
         transcript = data.get("transcript")
         title = data.get("title", "")
         rag_context = data.get("rag_context", "")
+        num_questions = data.get("num_questions", 5)
+        question_types = data.get("question_types", ["multiple_choice"])
 
         logger.info(f"Transcript length: {len(transcript) if transcript else 0}")
         logger.info(f"Title: {title}")
         logger.info(f"RAG context length: {len(rag_context) if rag_context else 0}")
+        logger.info(f"Number of questions requested: {num_questions}")
+        logger.info(f"Question types requested: {question_types}")
 
         if not transcript:
             logger.error("No transcript available for question generation")
@@ -55,6 +60,8 @@ class QuestionGeneratorAgent(ContentTutorAgent):
         try:
             await self.update_job_progress(job_id, 80.0, "Detecting subject and generating questions")
 
+            start_time = time.time()
+            print(f"[TIMER] Starting Subject Detection...")
             subject = self.determine_subject_type(f"{title} {transcript}")
             logger.info(f"Detected subject: {subject}")
 
@@ -64,9 +71,13 @@ class QuestionGeneratorAgent(ContentTutorAgent):
             full_context = f"{rag_context}\n\n{transcript}" if rag_context else transcript
             logger.info(f"Full context length: {len(full_context)}")
 
-            query = f"Generate quiz questions for: {title}"
+            query = f"Generate {num_questions} {'/'.join(question_types)} quiz questions for: {title}"
             logger.info(f"Query: {query}")
+            detection_time = time.time() - start_time
+            print(f"[TIMER] Subject Detection: {detection_time:.3f}s")
 
+            llm_start = time.time()
+            print(f"[TIMER] Starting LLM Question Generation...")
             match subject:
                 case ContentSubject.PHYSICS:
                     questions_data = await self.physics_tutor.generate_educational_questions(
@@ -82,8 +93,8 @@ class QuestionGeneratorAgent(ContentTutorAgent):
                     logger.info(f"After conversion: {len(questions)} questions")
                 case ContentSubject.MATHEMATICS:
                     questions_data = await self.physics_tutor.generate_educational_questions(
-                        query=f"Generate quiz questions for: {title}",
-                        context=f"{rag_context}\n\n{transcript}",
+                        query=query,
+                        context=full_context,
                         job_id=job_id,
                         difficulty_level=data.get("difficulty_level", "intermediate"),
                         content_type=ContentSubject.MATHEMATICS
@@ -91,8 +102,8 @@ class QuestionGeneratorAgent(ContentTutorAgent):
                     questions = self.convert_physics_format_to_standard(questions_data.get("questions", []))
                 case ContentSubject.CHEMISTRY:
                     questions_data = await self.physics_tutor.generate_educational_questions(
-                        query=f"Generate quiz questions for: {title}",
-                        context=f"{rag_context}\n\n{transcript}",
+                        query=query,
+                        context=full_context,
                         job_id=job_id,
                         difficulty_level=data.get("difficulty_level", "intermediate"),
                         content_type=ContentSubject.CHEMISTRY
@@ -100,8 +111,8 @@ class QuestionGeneratorAgent(ContentTutorAgent):
                     questions = self.convert_physics_format_to_standard(questions_data.get("questions", []))
                 case ContentSubject.BIOLOGY:
                     questions_data = await self.physics_tutor.generate_educational_questions(
-                        query=f"Generate quiz questions for: {title}",
-                        context=f"{rag_context}\n\n{transcript}",
+                        query=query,
+                        context=full_context,
                         job_id=job_id,
                         difficulty_level=data.get("difficulty_level", "intermediate"),
                         content_type=ContentSubject.BIOLOGY
@@ -109,22 +120,32 @@ class QuestionGeneratorAgent(ContentTutorAgent):
                     questions = self.convert_physics_format_to_standard(questions_data.get("questions", []))
                 case _:
                     questions_data = await self.physics_tutor.generate_educational_questions(
-                        query=f"Generate quiz questions for: {title}",
-                        context=f"{rag_context}\n\n{transcript}",
+                        query=query,
+                        context=full_context,
                         job_id=job_id,
                         difficulty_level=data.get("difficulty_level", "intermediate"),
                         content_type=ContentSubject.GENERAL
                     )
                     questions = self.convert_physics_format_to_standard(questions_data.get("questions", []))
 
+            llm_time = time.time() - llm_start
+            print(f"[TIMER] LLM Question Generation: {llm_time:.3f}s")
+
             await self.update_job_progress(job_id, 90.0, "Question generation completed")
 
+            db_start = time.time()
+            print(f"[TIMER] Starting Database Question Save...")
             logger.info(f"=== FINAL RESULTS ===")
             logger.info(f"Total questions generated: {len(questions)}")
             logger.info("Questions being saved", question_count=len(questions))
 
             await self.save_quiz_questions(job_id, questions)
             data["questions"] = questions
+            data["num_questions"] = num_questions
+            data["question_types"] = question_types
+
+            db_time = time.time() - db_start
+            print(f"[TIMER] Database Question Save: {db_time:.3f}s")
 
             logger.info(f"=== QUESTION GENERATOR END - SUCCESS ===")
             return data

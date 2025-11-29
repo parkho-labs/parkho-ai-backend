@@ -1,8 +1,10 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_, or_
+from datetime import datetime
 
 from ..models.content_job import ContentJob
+from ..api.v1.schemas import JobStatus
 
 
 class ContentJobRepository:
@@ -56,8 +58,8 @@ class ContentJobRepository:
 
     def reset_job_for_retry(self, job_id: int) -> bool:
         job = self.get(job_id)
-        if job and job.status == "failed":
-            job.status = "pending"
+        if job and job.status == JobStatus.FAILED:
+            job.status = JobStatus.PENDING
             job.progress = 0.0
             job.completed_at = None
             job.error_message = None
@@ -75,7 +77,7 @@ class ContentJobRepository:
         jobs = (
             self.session.query(ContentJob)
             .filter(ContentJob.input_config.contains(f'"{file_id}"'))
-            .filter(ContentJob.status.in_(["pending", "processing", "completed"]))
+            .filter(ContentJob.status.in_([JobStatus.PENDING, JobStatus.RUNNING, JobStatus.SUCCESS]))
             .order_by(desc(ContentJob.created_at))
             .all()
         )
@@ -94,3 +96,59 @@ class ContentJobRepository:
         """
         job = self.find_existing_job_by_file_id(file_id)
         return job.status if job else None
+
+    def get_by_id(self, job_id: int) -> Optional[ContentJob]:
+        """Alias for get() method for compatibility"""
+        return self.get(job_id)
+
+    def mark_failed(self, job_id: int, error_message: str) -> bool:
+        """Mark a job as failed with error message"""
+        job = self.get(job_id)
+        if job:
+            job.status = JobStatus.FAILED
+            job.error_message = error_message
+            job.completed_at = datetime.now()
+            self.session.commit()
+            return True
+        return False
+
+    def mark_running(self, job_id: int) -> bool:
+        """Mark a job as running"""
+        job = self.get(job_id)
+        if job:
+            job.status = JobStatus.RUNNING
+            self.session.commit()
+            return True
+        return False
+
+    def mark_success(self, job_id: int) -> bool:
+        """Mark a job as successfully completed"""
+        job = self.get(job_id)
+        if job:
+            job.status = JobStatus.SUCCESS
+            job.completed_at = datetime.now()
+            self.session.commit()
+            return True
+        return False
+
+    def update_progress(self, job_id: int, progress: float, message: str = None) -> bool:
+        """Update job progress and optional status message"""
+        job = self.get(job_id)
+        if job:
+            job.progress = progress
+            if message:
+                job.status_message = message
+            self.session.commit()
+            return True
+        return False
+
+    def create(self, job: ContentJob) -> ContentJob:
+        """Create a new job"""
+        self.session.add(job)
+        self.session.commit()
+        self.session.refresh(job)
+        return job
+
+    def delete(self, job_id: int) -> bool:
+        """Delete a job by ID"""
+        return self.delete_job(job_id)

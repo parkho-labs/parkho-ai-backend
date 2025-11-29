@@ -11,7 +11,7 @@ def check_job_exists(job_id: int, repo = Depends(get_content_job_repository)) ->
     job = repo.get(job_id)
     if not job:
         raise JobNotFoundError(job.id)
-    if job.status != JobStatus.COMPLETED:
+    if job.status != JobStatus.SUCCESS:
         raise HTTPException(
             status_code=409,
             detail=f"Job not complete. Current status: {job.status}"

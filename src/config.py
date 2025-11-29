@@ -47,10 +47,11 @@ class Settings(BaseSettings):
         default_factory=lambda: [
             "http://localhost:3000",
             "http://localhost:3001",
-            "http://localhost:5173",
+            "*",
             "https://parkho-ai-frontend-ku7bn6e62q-uc.a.run.app",
             "https://parkho-ai-frontend-846780462763.us-central1.run.app",
             "http://13.236.51.35:3000"
+
         ],
         description="Allowed CORS origins",
         validation_alias=AliasChoices("CORS_ALLOWED_ORIGINS", "ALLOWED_ORIGINS"),
@@ -132,7 +133,7 @@ class Settings(BaseSettings):
 
     # Gemini Video API Configuration
     gemini_video_api_enabled: bool = Field(
-        default=True,
+        default=False,
         description="Enable Google Gemini video understanding API"
     )
     gemini_video_model_name: str = Field(

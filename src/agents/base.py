@@ -5,6 +5,7 @@ from datetime import datetime
 from ..models.content_job import ContentJob
 from ..core.database import SessionLocal
 from ..core.websocket_manager import websocket_manager
+from ..api.v1.schemas import JobStatus
 
 logger = structlog.get_logger(__name__)
 
@@ -24,7 +25,7 @@ class ContentTutorAgent:
             job = self._get_job(db, job_id)
             if job:
                 job.progress = progress
-                job.status = "processing"
+                job.status = JobStatus.RUNNING
             db.commit()
             await self._push_progress_update(job_id, progress, message or f"Processing with {self.name}")
         except Exception:
@@ -38,7 +39,7 @@ class ContentTutorAgent:
         try:
             job = self._get_job(db, job_id)
             if job:
-                job.status = "failed"
+                job.status = JobStatus.FAILED
                 job.error_message = error_message
                 job.completed_at = datetime.now()
             db.commit()
