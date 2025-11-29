@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFi
 
 from src.utils import job_utils
 
-from ...dependencies import get_content_job_repository, get_file_storage, get_current_user_optional, get_current_user_required, get_db, get_quiz_repository
+from ...dependencies import get_content_job_repository, get_file_storage, get_current_user_optional, get_current_user_conditional, get_current_user_conditional, get_db, get_quiz_repository
 from ..schemas import (
     ContentProcessingRequest,
     FileProcessingResult,
@@ -67,7 +67,7 @@ async def process_content(
     response: Response,
     background_tasks: BackgroundTasks,
     repo = Depends(get_content_job_repository), #REVISIT - What does this do??
-    current_user: User = Depends(get_current_user_required)
+    current_user: User = Depends(get_current_user_conditional)
 ) -> List[FileProcessingResult]:
    
     try:
@@ -145,7 +145,7 @@ async def process_content(
 async def get_job_status(
     job_id: int,
     repo = Depends(get_content_job_repository),
-    current_user: User = Depends(get_current_user_required)
+    current_user: User = Depends(get_current_user_conditional)
 ) -> ContentJobResponse:
     try:
         job = repo.get(job_id)
@@ -175,7 +175,7 @@ async def get_job_status(
 async def get_job_results(
     job_id: int,
     repo = Depends(get_content_job_repository),
-    current_user: User = Depends(get_current_user_required)
+    current_user: User = Depends(get_current_user_conditional)
 ) -> ContentResults:
     try:
         job = job_utils.check_job_exists(job_id, repo)
@@ -209,7 +209,7 @@ async def get_job_results(
 async def get_job_content(
     job_id: int,
     repo = Depends(get_content_job_repository),
-    current_user: User = Depends(get_current_user_required)
+    current_user: User = Depends(get_current_user_conditional)
 ) -> ContentTextResponse:
     try:
         job = job_utils.check_job_exists(job_id, repo)
@@ -231,7 +231,7 @@ async def get_jobs_list(
     limit: int = 50,
     offset: int = 0,
     repo = Depends(get_content_job_repository),
-    current_user: User = Depends(get_current_user_required)
+    current_user: User = Depends(get_current_user_conditional)
 ) -> ContentJobsListResponse:
     try:
         jobs = repo.get_jobs_by_user(current_user.user_id, limit=limit, offset=offset)
@@ -266,7 +266,7 @@ async def get_jobs_list(
 async def delete_job(
     job_id: int,
     repo = Depends(get_content_job_repository),
-    current_user: User = Depends(get_current_user_required)
+    current_user: User = Depends(get_current_user_conditional)
 ):
     try:
         job = repo.get(job_id)

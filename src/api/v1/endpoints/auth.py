@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from ...dependencies import get_db, get_current_user_optional
+from ...dependencies import get_db, get_current_user_optional, get_current_user_optional_conditional
 from ....core.firebase import verify_firebase_token, get_or_create_user
 from ....models.user import User
 
@@ -92,7 +92,7 @@ async def create_user(
 
 @router.get("/me", response_model=Optional[UserResponse])
 async def get_current_user(
-    current_user: Optional[User] = Depends(get_current_user_optional)
+    current_user: Optional[User] = Depends(get_current_user_optional_conditional)
 ):
     if not current_user:
         return None

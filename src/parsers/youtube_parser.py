@@ -74,10 +74,8 @@ class YouTubeParser(BaseContentParser):
                 },
             }
 
-            try:
-                ydl_opts["cookiesfrombrowser"] = ("chrome",)
-            except:
-                pass
+            # Removed cookiesfrombrowser configuration to fix "no such table: meta" error
+            # YouTube public content doesn't require browser cookies
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 return ydl.extract_info(url, download=False)
@@ -131,10 +129,8 @@ class YouTubeParser(BaseContentParser):
                 },
             }
 
-            try:
-                ydl_opts["cookiesfrombrowser"] = ("chrome",)
-            except:
-                pass
+            # Removed cookiesfrombrowser configuration to fix "no such table: meta" error
+            # YouTube public content doesn't require browser cookies
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])

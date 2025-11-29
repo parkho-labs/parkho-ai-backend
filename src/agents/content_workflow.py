@@ -11,6 +11,8 @@ from ..parsers.content_parser_factory import ContentParserFactory
 from ..services.file_storage import FileStorageService
 from ..repositories.file_repository import FileRepository
 from ..services.rag_integration_service import get_rag_service
+from ..strategies.strategy_factory import ContentProcessingStrategyFactory
+from ..strategies.base_strategy import ProcessingStatus
 
 logger = structlog.get_logger(__name__)
 
@@ -19,6 +21,7 @@ class ContentWorkflow:
     def __init__(self):
         self.question_generator = QuestionGeneratorAgent()
         self.parser_factory = ContentParserFactory()
+        self.strategy_factory = ContentProcessingStrategyFactory()
         try:
             self.rag_service = get_rag_service()
         except Exception as e:
@@ -26,8 +29,176 @@ class ContentWorkflow:
             self.rag_service = None
 
     async def process_content(self, job_id: int):
-        logger.info(f"=== CONTENT WORKFLOW START ===")
+        """
+        Process content using strategy pattern.
+
+        This is the new entry point that selects and delegates to the appropriate
+        content processing strategy (Complex Pipeline or Direct Gemini).
+        """
+        logger.info("=== CONTENT WORKFLOW START (Strategy Pattern) ===")
         logger.info("Starting content processing workflow", job_id=job_id)
+
+        try:
+            # Get job configuration to determine strategy
+            with SessionLocal() as session:
+                from ..repositories.content_job_repository import ContentJobRepository
+                repo = ContentJobRepository(session)
+                job = repo.get_by_id(job_id)
+
+                if not job:
+                    raise ValueError(f"Job {job_id} not found")
+
+                input_config = job.input_config_dict.get("input_config", [])
+                job_config = job.input_config_dict
+
+                logger.info(
+                    "Job configuration loaded for strategy selection",
+                    job_id=job_id,
+                    input_config=input_config,
+                    job_config=job_config
+                )
+
+            # Select appropriate strategy
+            strategy_result = self.strategy_factory.select_strategy(input_config, job_config)
+            strategy = strategy_result.strategy
+            strategy_name = strategy_result.strategy_name
+
+            logger.info(
+                "Strategy selected",
+                job_id=job_id,
+                strategy=strategy_name,
+                reason=strategy_result.selection_reason,
+                fallback_available=strategy_result.fallback_available
+            )
+
+            # Execute strategy with fallback
+            result = await self._execute_strategy_with_fallback(
+                job_id, strategy, strategy_name, input_config, job_config
+            )
+
+            if result.success:
+                logger.info(
+                    "Content processing completed successfully",
+                    job_id=job_id,
+                    strategy=result.strategy_used,
+                    processing_time=result.processing_time_seconds
+                )
+            else:
+                logger.error(
+                    "Content processing failed",
+                    job_id=job_id,
+                    error=result.error,
+                    strategy=result.strategy_used
+                )
+                raise ValueError(f"Content processing failed: {result.error}")
+
+        except Exception as e:
+            logger.error("Content workflow failed", job_id=job_id, error=str(e), exc_info=True)
+
+            # Mark job as failed
+            with SessionLocal() as session:
+                from ..repositories.content_job_repository import ContentJobRepository
+                repo = ContentJobRepository(session)
+                repo.mark_failed(job_id, f"Workflow failed: {str(e)}")
+
+            await websocket_manager.broadcast_to_job(job_id, {
+                "type": "job_failed",
+                "job_id": job_id,
+                "error": str(e)
+            })
+
+            raise
+
+    async def _execute_strategy_with_fallback(
+        self,
+        job_id: int,
+        primary_strategy,
+        primary_strategy_name: str,
+        input_config: List[Dict[str, Any]],
+        job_config: Dict[str, Any]
+    ):
+        """Execute strategy with automatic fallback on failure"""
+
+        try:
+            # Try primary strategy
+            logger.info("Executing primary strategy", job_id=job_id, strategy=primary_strategy_name)
+            result = await primary_strategy.process_content(job_id)
+
+            if result.success:
+                return result
+            else:
+                logger.warning(
+                    "Primary strategy failed, attempting fallback",
+                    job_id=job_id,
+                    primary_strategy=primary_strategy_name,
+                    error=result.error
+                )
+
+        except Exception as e:
+            logger.warning(
+                "Primary strategy threw exception, attempting fallback",
+                job_id=job_id,
+                primary_strategy=primary_strategy_name,
+                error=str(e)
+            )
+
+        # Try fallback strategy
+        fallback_strategy = self.strategy_factory.get_fallback_strategy(
+            primary_strategy_name, input_config, job_config
+        )
+
+        if fallback_strategy:
+            logger.info(
+                "Executing fallback strategy",
+                job_id=job_id,
+                fallback_strategy=fallback_strategy.get_strategy_name()
+            )
+
+            try:
+                result = await fallback_strategy.process_content(job_id)
+
+                if result.success:
+                    logger.info(
+                        "Fallback strategy succeeded",
+                        job_id=job_id,
+                        fallback_strategy=result.strategy_used
+                    )
+                    return result
+                else:
+                    logger.error(
+                        "Fallback strategy also failed",
+                        job_id=job_id,
+                        error=result.error
+                    )
+
+            except Exception as e:
+                logger.error(
+                    "Fallback strategy threw exception",
+                    job_id=job_id,
+                    error=str(e)
+                )
+
+        # Both strategies failed
+        error_msg = f"All processing strategies failed for job {job_id}"
+        logger.error(error_msg, job_id=job_id)
+
+        from ..strategies.base_strategy import ProcessingResult, ProcessingStatus
+        return ProcessingResult(
+            status=ProcessingStatus.FAILED,
+            error=error_msg,
+            strategy_used="none"
+        )
+
+    # Legacy method - kept for backward compatibility and complex pipeline strategy
+    async def process_content_legacy(self, job_id: int):
+        """
+        Legacy content processing method.
+
+        This is the original implementation that's now wrapped by ComplexPipelineStrategy.
+        Kept for backward compatibility and to avoid circular dependencies.
+        """
+        logger.info(f"=== LEGACY CONTENT WORKFLOW START ===")
+        logger.info("Starting legacy content processing workflow", job_id=job_id)
 
         try:
             logger.info(f"Step 1: Marking job {job_id} as started")
