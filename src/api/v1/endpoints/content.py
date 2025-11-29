@@ -125,7 +125,7 @@ async def process_content(
 
         if any(result.status == JobStatus.FAILED for result in results):
             response.status_code = 207
-        elif any(result.status in [JobStatus.PROCESSING, JobStatus.COMPLETED] and result.job_id for result in results):
+        elif any(result.status in [JobStatus.RUNNING, JobStatus.SUCCESS] and result.job_id for result in results):
             response.status_code = 207
         else:
             response.status_code = 207

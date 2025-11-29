@@ -1,6 +1,7 @@
 from typing import Dict, Any, List
 from datetime import datetime
 import asyncio
+import time
 import structlog
 
 from .question_generator import QuestionGeneratorAgent
@@ -13,6 +14,7 @@ from ..repositories.file_repository import FileRepository
 from ..services.rag_integration_service import get_rag_service
 from ..strategies.strategy_factory import ContentProcessingStrategyFactory
 from ..strategies.base_strategy import ProcessingStatus
+from ..api.v1.schemas import JobStatus
 
 logger = structlog.get_logger(__name__)
 
@@ -43,7 +45,7 @@ class ContentWorkflow:
             with SessionLocal() as session:
                 from ..repositories.content_job_repository import ContentJobRepository
                 repo = ContentJobRepository(session)
-                job = repo.get_by_id(job_id)
+                job = repo.get(job_id)
 
                 if not job:
                     raise ValueError(f"Job {job_id} not found")
@@ -200,7 +202,11 @@ class ContentWorkflow:
         logger.info(f"=== LEGACY CONTENT WORKFLOW START ===")
         logger.info("Starting legacy content processing workflow", job_id=job_id)
 
+        workflow_start = time.time()
+        print(f"[TIMER] === WORKFLOW START ===")
+
         try:
+            step_start = time.time()
             logger.info(f"Step 1: Marking job {job_id} as started")
             await self.mark_job_started(job_id)
 
@@ -212,24 +218,39 @@ class ContentWorkflow:
                 input_config=job.input_config_dict,
                 has_output_config=bool(job.output_config)
             )
+            step_time = time.time() - step_start
+            print(f"[TIMER] Job Initialization: {step_time:.3f}s")
 
+            step_start = time.time()
             logger.info(f"Step 3: Parsing content sources for job {job_id}")
             combined_content, combined_title, source_metadata = await self.parse_all_content_sources(job)
             logger.info(f"Content parsed - length: {len(combined_content)}, title: {combined_title}")
             logger.info("Source metadata captured", job_id=job_id, source_metadata=source_metadata)
+            step_time = time.time() - step_start
+            print(f"[TIMER] Content Parsing: {step_time:.3f}s")
 
+            step_start = time.time()
             logger.info(f"Step 4: Retrieving RAG context for job {job_id}")
             rag_context = await self.retrieve_rag_context_if_needed(job, combined_title, combined_content)
             logger.info(f"RAG context retrieved - length: {len(rag_context) if rag_context else 0}")
+            step_time = time.time() - step_start
+            print(f"[TIMER] RAG Context Retrieval: {step_time:.3f}s")
 
+            step_start = time.time()
             logger.info(f"Step 5: Generating summary for job {job_id}")
             summary = await self.generate_summary(job_id, combined_content, combined_title, rag_context)
             logger.info(f"Summary generated - length: {len(summary) if summary else 0}")
+            step_time = time.time() - step_start
+            print(f"[TIMER] Summary Generation: {step_time:.3f}s")
 
+            step_start = time.time()
             logger.info(f"Step 6: Running question generation for job {job_id}")
             questions_result = await self.run_question_generation(job_id, job, combined_content, combined_title, rag_context)
             logger.info(f"Question generation completed - result keys: {list(questions_result.keys()) if questions_result else 'None'}")
+            step_time = time.time() - step_start
+            print(f"[TIMER] Question Generation: {step_time:.3f}s")
 
+            step_start = time.time()
             logger.info(f"Step 7: Finalizing job {job_id}")
             logger.info(f"FINALIZE DEBUG - questions_result type: {type(questions_result)}")
             logger.info(f"FINALIZE DEBUG - questions_result value: {questions_result}")
@@ -241,6 +262,11 @@ class ContentWorkflow:
 
             logger.info(f"Step 8: Marking job {job_id} as completed")
             await self.mark_job_completed(job_id)
+            step_time = time.time() - step_start
+            print(f"[TIMER] Job Finalization: {step_time:.3f}s")
+
+            total_time = time.time() - workflow_start
+            print(f"[TIMER] === TOTAL WORKFLOW TIME: {total_time:.3f}s ===")
 
             logger.info(f"=== CONTENT WORKFLOW COMPLETED SUCCESSFULLY ===")
             logger.info("Content processing workflow completed", job_id=job_id)
@@ -509,7 +535,7 @@ class ContentWorkflow:
         try:
             job = db.query(ContentJob).filter(ContentJob.id == job_id).first()
             if job:
-                job.status = "processing" #REVISIT - use enumbs here no hardcoding
+                job.status = JobStatus.RUNNING
                 job.progress = 0.0
             db.commit()
         except Exception:
@@ -523,14 +549,14 @@ class ContentWorkflow:
         try:
             job = db.query(ContentJob).filter(ContentJob.id == job_id).first()
             if job:
-                job.status = "completed"
+                job.status = JobStatus.SUCCESS
                 job.completed_at = datetime.now()
                 job.progress = 100.0
             db.commit()
 
             await websocket_manager.broadcast_to_job(job_id, {
                 "type": "completion",
-                "status": "completed",
+                "status": JobStatus.SUCCESS,
                 "message": "Content processing completed! Your results are ready.",
                 "progress": 100.0
             })
@@ -545,7 +571,7 @@ class ContentWorkflow:
         try:
             job = db.query(ContentJob).filter(ContentJob.id == job_id).first()
             if job:
-                job.status = "failed"
+                job.status = JobStatus.FAILED
                 job.completed_at = datetime.now()
                 job.error_message = error_message
             db.commit()
@@ -566,7 +592,7 @@ class ContentWorkflow:
             websocket_data = {
                 "type": "progress",
                 "progress": progress,
-                "status": "processing"
+                "status": JobStatus.RUNNING
             }
             if message:
                 websocket_data["message"] = message

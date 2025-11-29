@@ -33,11 +33,12 @@ class ContentProcessorService:
         async def run_async():
             try:
                 await self.process_content_background(job_id)
-                logger.info("=== CONTENT PROCESSOR COMPLETED SUCCESSFULLY ===")
             except Exception as e:
                 logger.error("=== CONTENT PROCESSOR FAILED ===")
                 logger.error("Content processing failed", job_id=job_id, error=str(e), exc_info=True)
                 raise
+
+            logger.info("=== CONTENT PROCESSOR COMPLETED SUCCESSFULLY ===")  # Only if no exception
 
         # Always create a new event loop in the thread since we're running in ThreadPoolExecutor
         try:
@@ -47,6 +48,9 @@ class ContentProcessorService:
             try:
                 loop.run_until_complete(run_async())
                 logger.info(f"Task completed successfully for job {job_id}")
+            except Exception as e:
+                logger.error(f"Failed to execute async task for job {job_id}: {e}")
+                raise
             finally:
                 loop.close()
         except Exception as e:

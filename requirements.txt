@@ -13,10 +13,9 @@ anthropic>=0.7.0
 google-adk>=0.1.0
 google-generativeai>=0.3.0
 
-# Video/Audio Processing
+# Video Processing
 yt-dlp>=2023.10.0
-openai-whisper>=20231117
-ffmpeg-python>=0.2.0
+youtube-transcript-api>=0.6.0
 
 # Data Processing
 pydantic>=2.5.0

@@ -22,11 +22,11 @@ class StandardAPIResponse(BaseModel, Generic[T]):
 
 
 class JobStatus(str, Enum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+    PENDING = "pending"      # Job is queued, waiting to start
+    RUNNING = "running"      # Job has started and is actively processing
+    SUCCESS = "success"      # Job completed successfully
+    FAILED = "failed"        # Job failed with errors
+    CANCELLED = "cancelled"  # Job was cancelled by user
 
 
 class QuestionType(str, Enum):
