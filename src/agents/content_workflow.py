@@ -73,6 +73,13 @@ class ContentWorkflow:
                 fallback_available=strategy_result.fallback_available
             )
 
+            # Agent routing log
+            logger.info(
+                f"AGENT ROUTING: Job {job_id} routed to {strategy_name}",
+                job_id=job_id,
+                agent_type=strategy_name
+            )
+
             # Execute strategy with fallback
             result = await self._execute_strategy_with_fallback(
                 job_id, strategy, strategy_name, input_config, job_config
@@ -199,77 +206,26 @@ class ContentWorkflow:
         This is the original implementation that's now wrapped by ComplexPipelineStrategy.
         Kept for backward compatibility and to avoid circular dependencies.
         """
-        logger.info(f"=== LEGACY CONTENT WORKFLOW START ===")
-        logger.info("Starting legacy content processing workflow", job_id=job_id)
-
-        workflow_start = time.time()
-        print(f"[TIMER] === WORKFLOW START ===")
+        logger.info("Content workflow started", job_id=job_id)
 
         try:
-            step_start = time.time()
-            logger.info(f"Step 1: Marking job {job_id} as started")
             await self.mark_job_started(job_id)
-
-            logger.info(f"Step 2: Validating and getting job {job_id}")
             job = await self.validate_and_get_job(job_id)
-            logger.info(
-                "Job configuration loaded",
-                job_id=job_id,
-                input_config=job.input_config_dict,
-                has_output_config=bool(job.output_config)
-            )
-            step_time = time.time() - step_start
-            print(f"[TIMER] Job Initialization: {step_time:.3f}s")
 
-            step_start = time.time()
-            logger.info(f"Step 3: Parsing content sources for job {job_id}")
             combined_content, combined_title, source_metadata = await self.parse_all_content_sources(job)
-            logger.info(f"Content parsed - length: {len(combined_content)}, title: {combined_title}")
-            logger.info("Source metadata captured", job_id=job_id, source_metadata=source_metadata)
-            step_time = time.time() - step_start
-            print(f"[TIMER] Content Parsing: {step_time:.3f}s")
+            if not combined_content:
+                raise ValueError("No content could be extracted from provided sources")
 
-            step_start = time.time()
-            logger.info(f"Step 4: Retrieving RAG context for job {job_id}")
             rag_context = await self.retrieve_rag_context_if_needed(job, combined_title, combined_content)
-            logger.info(f"RAG context retrieved - length: {len(rag_context) if rag_context else 0}")
-            step_time = time.time() - step_start
-            print(f"[TIMER] RAG Context Retrieval: {step_time:.3f}s")
 
-            step_start = time.time()
-            logger.info(f"Step 5: Generating summary for job {job_id}")
             summary = await self.generate_summary(job_id, combined_content, combined_title, rag_context)
-            logger.info(f"Summary generated - length: {len(summary) if summary else 0}")
-            step_time = time.time() - step_start
-            print(f"[TIMER] Summary Generation: {step_time:.3f}s")
 
-            step_start = time.time()
-            logger.info(f"Step 6: Running question generation for job {job_id}")
             questions_result = await self.run_question_generation(job_id, job, combined_content, combined_title, rag_context)
-            logger.info(f"Question generation completed - result keys: {list(questions_result.keys()) if questions_result else 'None'}")
-            step_time = time.time() - step_start
-            print(f"[TIMER] Question Generation: {step_time:.3f}s")
 
-            step_start = time.time()
-            logger.info(f"Step 7: Finalizing job {job_id}")
-            logger.info(f"FINALIZE DEBUG - questions_result type: {type(questions_result)}")
-            logger.info(f"FINALIZE DEBUG - questions_result value: {questions_result}")
-            if questions_result:
-                logger.info(f"FINALIZE DEBUG - questions_result keys: {list(questions_result.keys())}")
-                if 'questions' in questions_result:
-                    logger.info(f"FINALIZE DEBUG - questions count: {len(questions_result.get('questions', []))}")
             await self.finalize_job(job_id, combined_content, combined_title, summary, questions_result)
-
-            logger.info(f"Step 8: Marking job {job_id} as completed")
             await self.mark_job_completed(job_id)
-            step_time = time.time() - step_start
-            print(f"[TIMER] Job Finalization: {step_time:.3f}s")
 
-            total_time = time.time() - workflow_start
-            print(f"[TIMER] === TOTAL WORKFLOW TIME: {total_time:.3f}s ===")
-
-            logger.info(f"=== CONTENT WORKFLOW COMPLETED SUCCESSFULLY ===")
-            logger.info("Content processing workflow completed", job_id=job_id)
+            logger.info("Content workflow completed", job_id=job_id)
 
         except Exception as e:
             logger.error("Content processing workflow failed", job_id=job_id, error=str(e))
@@ -378,6 +334,11 @@ class ContentWorkflow:
 
     async def retrieve_rag_context_if_needed(self, job, combined_title, combined_content):
         if not job.collection_name:
+            return ""
+
+        # Skip RAG for single-source content types that are self-contained
+        input_config = job.input_config_dict or []
+        if len(input_config) == 1 and input_config[0].get("content_type") in ["youtube", "pdf", "docx"]:
             return ""
 
         if not self.rag_service:

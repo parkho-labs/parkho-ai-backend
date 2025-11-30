@@ -13,7 +13,7 @@ settings = get_settings()
 
 class QuestionEnhancementService:
     def __init__(self):
-        self.physics_tutor = PhysicsTutorAgent()
+        self.physics_agent = PhysicsTutorAgent()
         try:
             self.rag_service = get_rag_service()
         except Exception as e:
@@ -123,16 +123,19 @@ class QuestionEnhancementService:
                 "use_jee_template": generation_options["use_jee_template"]
             }
 
-            if job_id:
-                result = await self.physics_tutor.run(job_id, agent_data)
-                return result.get("content", {})
-            else:
-                return await self.physics_tutor.generate_educational_questions(
-                    query=query,
-                    context=context,
-                    difficulty_level=generation_options["difficulty_level"],
-                    use_jee_template=generation_options["use_jee_template"]
-                )
+            question_types = generation_options["question_types"]
+            total_questions = generation_options["num_questions"]
+            questions_per_type = max(1, total_questions // len(question_types))
+
+            agent_input = {
+                "content": f"{context}\n\n{query}",
+                "title": "Educational Questions Request",
+                "question_config": {qt: questions_per_type for qt in question_types},
+                "difficulty_level": generation_options["difficulty_level"],
+                "job_id": job_id
+            }
+
+            return await self._run_agent(self.physics_agent, agent_input)
 
         except Exception as e:
             logger.error("Agent question generation failed", error=str(e))
@@ -325,3 +328,17 @@ class QuestionEnhancementService:
                 }
             }
         }
+
+    async def _run_agent(self, agent, input_data):
+        from google.adk.agents.invocation_context import InvocationContext
+
+        ctx = InvocationContext(input_data=input_data)
+        agent_stream = agent._run_async_impl(ctx)
+
+        async for event in agent_stream:
+            if event.type == "agent_output":
+                return event.data
+            elif event.type == "agent_error":
+                raise Exception(event.data.get("error", "Agent failed"))
+
+        return {}

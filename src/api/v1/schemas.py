@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List, Dict, Generic, TypeVar
+from typing import Optional, List, Dict, Generic, TypeVar, Any
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -33,6 +33,7 @@ class QuestionType(str, Enum):
     MULTIPLE_CHOICE = "multiple_choice"
     TRUE_FALSE = "true_false"
     SHORT_ANSWER = "short_answer"
+    MULTIPLE_CORRECT = "multiple_correct"
 
 
 class QuestionTypeCount(BaseModel):
@@ -84,9 +85,8 @@ class ContentInput(BaseModel):
 
 class ContentProcessingRequest(BaseModel):
     input_config: List[ContentInput] = Field(min_items=1)
-    question_types: List[QuestionType] = Field(default=[QuestionType.MULTIPLE_CHOICE])
+    question_types: Dict[str, int] = Field(default={"multiple_choice": 5}, description="Question types with counts")
     difficulty_level: DifficultyLevel = Field(default=DifficultyLevel.INTERMEDIATE)
-    num_questions: int = Field(default=5, ge=1, le=50)
     generate_summary: bool = Field(default=True)
     llm_provider: LLMProvider = Field(default=LLMProvider.OPENAI)
     collection_name: Optional[str] = Field(default=None, description="Collection to use for RAG context")
@@ -100,9 +100,8 @@ class ContentProcessingRequest(BaseModel):
                     {"content_type": "youtube", "id": "https://youtu.be/abc123"},
                     {"content_type": "pdf", "id": "file-hash-456"}
                 ],
-                "question_types": ["multiple_choice", "short_answer"],
+                "question_types": {"multiple_choice": 3, "short_answer": 2},
                 "difficulty_level": "intermediate",
-                "num_questions": 5,
                 "generate_summary": True,
                 "llm_provider": "openai",
                 "collection_name": "physics_course",
@@ -185,14 +184,27 @@ class QuizQuestionResponse(BaseModel):
     max_score: int
 
 
+class QuestionConfig(BaseModel):
+    type: QuestionType
+    options: Optional[Dict[str, str]] = None
+    requires_diagram: bool = False
+    diagram_type: Optional[str] = None
+    diagram_elements: Optional[Dict[str, Any]] = None
+
+class QuestionMetadata(BaseModel):
+    video_timestamp: Optional[str] = None
+    sources: Optional[Dict[str, Any]] = None
+
 class QuizQuestion(BaseModel):
     question_id: str
     question: str
-    type: QuestionType
-    options: Optional[Dict[str, str]] = None
+    question_config: QuestionConfig
+    metadata: QuestionMetadata = Field(default_factory=dict)
     max_score: int = 1
 
 class QuizResponse(BaseModel):
+    quiz_id: str
+    quiz_title: str
     questions: List[QuizQuestion]
     total_questions: int
     total_score: int
