@@ -3,6 +3,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Response
 
 from src.utils import job_utils
+from ..mappers.quiz_response_mapper import QuizResponseMapper
 
 from ...dependencies import get_content_job_repository, get_file_storage, get_current_user_optional, get_current_user_conditional, get_current_user_conditional, get_db, get_quiz_repository
 from ..schemas import (
@@ -85,9 +86,8 @@ async def process_content(
 
         job.set_input_config(
             input_config=input_config_data,
-            question_types=[qt.value for qt in request.question_types],
+            question_types=request.question_types,
             difficulty_level=request.difficulty_level.value,
-            num_questions=request.num_questions,
             generate_summary=request.generate_summary,
             llm_provider=request.llm_provider.value
         )
@@ -120,7 +120,7 @@ async def process_content(
             "Multimodal content processing job created",
             job_id=job.id,
             input_config=input_config_data,
-            question_types=[qt.value for qt in request.question_types]
+            question_types=request.question_types
         )
 
         if any(result.status == JobStatus.FAILED for result in results):
@@ -326,33 +326,7 @@ async def get_job_quiz(
                 detail="Content not found - quiz questions were not generated during processing"
             )
 
-        quiz_questions = []
-        total_score = 0
-
-        for q in quiz_questions_db:
-            try:
-                question_data = QuizQuestion(
-                    question_id=q.question_id,
-                    question=q.question,
-                    type=QuestionType(q.type),
-                    max_score=q.max_score
-                )
-
-                if q.type == "multiple_choice" and "options" in q.answer_config:
-                    question_data.options = q.answer_config["options"]
-
-                quiz_questions.append(question_data)
-                total_score += q.max_score
-            except Exception as e:
-                logger.error(f"Error processing question {q.question_id}: {e}")
-                continue
-
-        return QuizResponse(
-            questions=quiz_questions,
-            total_questions=len(quiz_questions_db),
-            total_score=total_score,
-            summary=job.summary
-        )
+        return QuizResponseMapper.map_to_quiz_response(quiz_questions_db, job)
 
     except JobNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
