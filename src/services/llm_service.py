@@ -22,11 +22,15 @@ class LLMService:
         openai_api_key: Optional[str] = None,
         anthropic_api_key: Optional[str] = None,
         google_api_key: Optional[str] = None,
+        openai_model_name: str = "gpt-4o-mini",
+        anthropic_model_name: str = "claude-3-haiku-20240307",
         google_model_name: str = "gemini-1.5-flash"
     ):
         self.openai_api_key = openai_api_key
         self.anthropic_api_key = anthropic_api_key
         self.google_api_key = google_api_key
+        self.openai_model_name = openai_model_name
+        self.anthropic_model_name = anthropic_model_name
         self.google_model_name = google_model_name
 
         # Initialize clients
@@ -61,7 +65,7 @@ class LLMService:
         system_prompt: str,
         user_prompt: str,
         temperature: float = 0.1,
-        max_tokens: int = 4000,
+        max_tokens: int = 10000,
         preferred_provider: Optional[LLMProvider] = None
     ) -> str:
         """
@@ -127,7 +131,7 @@ class LLMService:
 
         try:
             response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=self.openai_model_name,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 messages=[
@@ -136,7 +140,7 @@ class LLMService:
                 ]
             )
             result = response.choices[0].message.content
-            logger.info("OpenAI generation completed", response_length=len(result))
+            logger.info("OpenAI generation completed", model=self.openai_model_name, response_length=len(result))
             return result
 
         except openai.AuthenticationError as e:
@@ -156,7 +160,7 @@ class LLMService:
             full_prompt = f"System: {system_prompt}\n\nHuman: {user_prompt}\n\nAssistant:"
 
             response = self.anthropic_client.messages.create(
-                model="claude-3-haiku-20240307",
+                model=self.anthropic_model_name,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 messages=[
@@ -164,7 +168,7 @@ class LLMService:
                 ]
             )
             result = response.content[0].text
-            logger.info("Anthropic generation completed", response_length=len(result))
+            logger.info("Anthropic generation completed", model=self.anthropic_model_name, response_length=len(result))
             return result
 
         except Exception as e:
@@ -245,9 +249,9 @@ class LLMService:
         self,
         video_url: str,
         prompt: str,
-        model_name: str = "gemini-1.5-pro",
+        model_name: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 4000
+        max_tokens: int = 10000
     ) -> str:
         """
         Generate content analysis for video using Google Gemini's video understanding API.
@@ -255,7 +259,7 @@ class LLMService:
         Args:
             video_url: YouTube URL to analyze
             prompt: Analysis prompt for the video
-            model_name: Gemini model to use (should support video)
+            model_name: Gemini model to use (defaults to google_model_name from config)
             temperature: Generation temperature
             max_tokens: Maximum tokens to generate
 
@@ -267,6 +271,10 @@ class LLMService:
         """
         if not self.google_client:
             raise ValueError("Google Gemini client not available. Check API key.")
+
+        # Use configured model name if not specified
+        if model_name is None:
+            model_name = self.google_model_name
 
         try:
             logger.info("Starting Gemini video analysis", video_url=video_url, model=model_name)
@@ -324,10 +332,9 @@ Please provide a thorough analysis based on the video content.
 
     def get_video_model_name(self) -> str:
         """
-        Get the recommended model name for video analysis.
+        Get the configured model name for video analysis.
 
         Returns:
             Model name string for video processing
         """
-        # Use Pro model for video analysis as it has better video understanding
-        return "gemini-1.5-pro"
+        return self.google_model_name

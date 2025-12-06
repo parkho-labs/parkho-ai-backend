@@ -15,7 +15,6 @@ google-generativeai>=0.3.0
 
 # Video Processing
 yt-dlp>=2023.10.0
-youtube-transcript-api>=0.6.0
 
 # Data Processing
 pydantic>=2.5.0

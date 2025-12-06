@@ -13,6 +13,7 @@ from typing import Dict, Any, List
 from .base_strategy import ContentProcessingStrategy, ProcessingResult, ProcessingStatus
 from ..core.database import get_db
 from ..repositories.content_job_repository import ContentJobRepository
+from ..repositories.quiz_repository import QuizRepository
 from ..api.v1.schemas import JobStatus
 from ..core.websocket_manager import websocket_manager
 
@@ -161,6 +162,8 @@ class DirectGeminiStrategy(ContentProcessingStrategy):
             openai_api_key=settings.openai_api_key,
             anthropic_api_key=settings.anthropic_api_key,
             google_api_key=settings.google_api_key,
+            openai_model_name=settings.openai_model_name,
+            anthropic_model_name=settings.anthropic_model_name,
             google_model_name=settings.gemini_video_model_name
         )
 
@@ -191,7 +194,9 @@ class DirectGeminiStrategy(ContentProcessingStrategy):
         prompt = f"""
 Analyze this YouTube video and provide a comprehensive educational analysis.
 
-Please provide your response in the following JSON format:
+IMPORTANT: Return ONLY valid JSON. Do not wrap in markdown code blocks or add any text before/after the JSON.
+
+Return EXACTLY this JSON structure:
 
 {{
     "title": "Video title",
@@ -218,14 +223,15 @@ Please provide your response in the following JSON format:
     }}
 }}
 
-Requirements:
+CRITICAL REQUIREMENTS:
+- "options" MUST be an object/dictionary with keys A, B, C, D (NOT an array)
+- Example: {{"A": "Answer 1", "B": "Answer 2", "C": "Answer 3", "D": "Answer 4"}}
+- Do NOT use: ["Answer 1", "Answer 2", "Answer 3", "Answer 4"]
 - Generate exactly {num_questions} questions
 - Question types: {', '.join(question_types)}
 - Difficulty level: {difficulty_level}
 - {'Include a comprehensive summary' if generate_summary else 'Summary not required'}
-- Ensure questions test understanding of key concepts from the video
-- Provide clear explanations for correct answers
-- Make questions educational and relevant to the content
+- Return ONLY the JSON object, nothing else
 
 Focus on creating high-quality educational content that helps learners understand and retain the key concepts presented in the video.
 """
@@ -237,11 +243,33 @@ Focus on creating high-quality educational content that helps learners understan
         Parse Gemini API response into structured format.
         """
         import json
+        import re
+
+        logger.info(
+            "Parsing Gemini response",
+            response_length=len(response),
+            starts_with_json=response.strip().startswith('{'),
+            response_preview=response[:200]
+        )
+
+        # Strip markdown code blocks if present (```json ... ```)
+        cleaned_response = response.strip()
+        if cleaned_response.startswith('```'):
+            # Remove markdown code block wrapper
+            cleaned_response = re.sub(r'^```(?:json)?\n', '', cleaned_response)
+            cleaned_response = re.sub(r'\n```$', '', cleaned_response)
+            logger.info("Stripped markdown code blocks from response")
 
         try:
             # Try to parse as JSON first
-            if response.strip().startswith('{'):
-                data = json.loads(response)
+            if cleaned_response.strip().startswith('{'):
+                data = json.loads(cleaned_response)
+                logger.info(
+                    "Successfully parsed JSON response",
+                    has_questions=bool(data.get("questions")),
+                    question_count=len(data.get("questions", [])),
+                    json_keys=list(data.keys())
+                )
                 return {
                     "title": data.get("title", "YouTube Video"),
                     "transcript": data.get("transcript", ""),
@@ -255,11 +283,15 @@ Focus on creating high-quality educational content that helps learners understan
                 }
             else:
                 # If not JSON, try to extract information from text response
-                return self._extract_from_text_response(response, url)
+                logger.warning(
+                    "Response doesn't start with JSON, using text extraction",
+                    response_start=cleaned_response[:100]
+                )
+                return self._extract_from_text_response(cleaned_response, url)
 
         except json.JSONDecodeError as e:
             logger.warning("Failed to parse Gemini response as JSON, falling back to text extraction", error=str(e))
-            return self._extract_from_text_response(response, url)
+            return self._extract_from_text_response(cleaned_response, url)
 
     def _extract_from_text_response(self, response: str, url: str) -> Dict[str, Any]:
         """
@@ -337,14 +369,55 @@ Focus on creating high-quality educational content that helps learners understan
         """Save processing results to the job in database."""
         job = repo.get_by_id(job_id)
         if job:
-            output_config = {
-                "content_text": results["content_text"],
-                "summary": results["summary"],
-                "questions": results["questions"],
-                "metadata": results["metadata"]
-            }
-            repo.update_output_config(job_id, output_config)
-            repo.mark_completed(job_id)
+            # Update output config using the model's method
+            job.update_output_config(
+                content_text=results["content_text"],
+                summary=results["summary"],
+                questions=results["questions"],
+                metadata=results["metadata"]
+            )
+
+            # Create QuizQuestion records in database
+            questions = results.get("questions", [])
+            logger.info(
+                "Processing questions for database save",
+                job_id=job_id,
+                question_count=len(questions),
+                has_questions=bool(questions)
+            )
+            if questions:
+                quiz_repo = QuizRepository(repo.session)
+
+                # Prepare questions for batch insert
+                questions_data = []
+                for idx, q in enumerate(questions):
+                    question_data = {
+                        "job_id": job_id,
+                        "question_id": q.get("question_id", q.get("id", f"q_{idx+1}")),
+                        "question": q.get("question", ""),
+                        "type": q.get("type", "multiple_choice"),
+                        "answer_config": q.get("answer_config", {}),
+                        "context": q.get("context", ""),
+                        "max_score": q.get("max_score", 1)
+                    }
+                    questions_data.append(question_data)
+
+                logger.info(
+                    "Prepared questions for batch insert",
+                    job_id=job_id,
+                    sample_question=questions_data[0] if questions_data else None
+                )
+
+                # Save questions to database
+                quiz_repo.create_questions_batch(questions_data)
+                logger.info(
+                    "Questions saved to database",
+                    job_id=job_id,
+                    question_count=len(questions_data)
+                )
+
+            # Mark as success and commit
+            repo.mark_success(job_id)
 
     async def _update_progress(
         self,

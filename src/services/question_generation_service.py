@@ -16,7 +16,10 @@ class QuestionGenerationService:
         self.llm_service = LLMService(
             openai_api_key=settings.openai_api_key,
             anthropic_api_key=settings.anthropic_api_key,
-            google_api_key=settings.google_api_key
+            google_api_key=settings.google_api_key,
+            openai_model_name=settings.openai_model_name,
+            anthropic_model_name=settings.anthropic_model_name,
+            google_model_name=settings.google_model_name
         )
 
     async def generate_questions(self, subject: str = None, content: str = "",
@@ -29,7 +32,7 @@ class QuestionGenerationService:
                 system_prompt="You are an expert educator. Generate educational questions based on the provided content.",
                 user_prompt=prompt,
                 temperature=0.7,
-                max_tokens=4000
+                max_tokens=10000
             )
 
             cleaned_response = self._clean_json_response(response)

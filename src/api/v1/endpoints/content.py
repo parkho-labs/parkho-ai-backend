@@ -287,6 +287,35 @@ async def delete_job(
         raise HTTPException(status_code=500, detail="Failed to delete job")
 
 
+@router.delete("/")
+async def delete_all_jobs(
+    repo = Depends(get_content_job_repository)
+):
+    """Delete all jobs from the database and reset auto-increment."""
+    try:
+        from sqlalchemy import delete, text
+        from ....models.content_job import ContentJob
+
+        # Delete all jobs
+        result = repo.session.execute(delete(ContentJob))
+        deleted_count = result.rowcount
+
+        # Reset auto-increment to start from 1
+        # SQLite syntax
+        repo.session.execute(text("DELETE FROM sqlite_sequence WHERE name='content_jobs'"))
+
+        repo.session.commit()
+
+        logger.info("All jobs deleted and ID reset", deleted_count=deleted_count)
+        return {
+            "message": "All jobs deleted successfully and ID counter reset",
+            "deleted_count": deleted_count
+        }
+    except Exception as e:
+        logger.error("Failed to delete all jobs", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to delete all jobs")
+
+
 
 @router.get("/supported-types")
 async def get_supported_types():
