@@ -16,7 +16,6 @@ settings = get_settings()
 
 class ContentProcessorService:
     def __init__(self):
-        self.workflow = ContentWorkflow()
         self.executor = ThreadPoolExecutor(max_workers=settings.max_concurrent_jobs)
         self.running_jobs = set()
         try:
@@ -70,7 +69,11 @@ class ContentProcessorService:
                 raise ValueError(f"Job {job_id} not found")
 
             logger.info("Processing with ContentWorkflow", job_id=job_id)
-            await self.workflow.process_content(job_id)
+
+            from ..core.database import SessionLocal
+            with SessionLocal() as session:
+                workflow = ContentWorkflow(session)
+                await workflow.process_content(job_id)
 
             # Process collection linking regardless of processing type
             await self.process_collection_linking(job_id)

@@ -1,141 +1,97 @@
-import requests
-from typing import Dict, Any
-from bs4 import BeautifulSoup
-from urllib.parse import urlparse
 import time
+import structlog
+import httpx
 
 from .base_parser import BaseContentParser, ContentParseResult
+from ..exceptions import NetworkError, ValidationError, ParsingError
+from ..utils.url_utils import validate_url, extract_domain, supports_web_url
+from ..utils.string_utils import truncate_text, clean_text
 
 
-#REVISIT - Feels complicatied, should we make it a vector embedding for rag in default collection.. instead of parsing, query result would be much better I think
-# Same for youtube video, docx and others. 
-class WebParser(BaseContentParser):
-    def __init__(self):
-        self.timeout = 30  
-        self.max_content_length = 1000000  # 1MB text limit
-        self.headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+logger = structlog.get_logger(__name__)
+
+
+class WebContentFetcher:
+    JINA_READER_BASE = "https://r.jina.ai"
+    TIMEOUT_SECONDS = 30
+
+    async def fetch_content(self, url: str) -> httpx.Response:
+        jina_url = f"{self.JINA_READER_BASE}/{url}"
+
+        try:
+            async with httpx.AsyncClient(timeout=self.TIMEOUT_SECONDS) as client:
+                response = await client.get(jina_url)
+                response.raise_for_status()
+                return response
+        except httpx.TimeoutException as e:
+            raise NetworkError("Request timed out")
+        except httpx.HTTPStatusError as e:
+            raise NetworkError(f"HTTP {e.response.status_code}")
+
+
+class WebContentProcessor:
+    MAX_CONTENT_LENGTH = 1000000
+
+    def process_response(self, response: httpx.Response) -> str:
+        content = response.text
+
+        if not content or not content.strip():
+            raise ParsingError("No readable content found on webpage")
+
+        if len(content) > self.MAX_CONTENT_LENGTH:
+            content = truncate_text(content, self.MAX_CONTENT_LENGTH)
+
+        return clean_text(content)
+
+    def build_metadata(self, url: str, response: httpx.Response, content: str) -> dict:
+        domain = extract_domain(url)
+        title = response.headers.get("X-Title", domain)
+        description = response.headers.get("X-Description", "")
+
+        return {
+            "url": url,
+            "domain": domain,
+            "title": title,
+            "description": description,
+            "content_length": len(content),
+            "source_type": "web_url"
         }
 
+
+class WebParser(BaseContentParser):
+    def __init__(self):
+        self.fetcher = WebContentFetcher()
+        self.processor = WebContentProcessor()
+
     async def parse(self, source: str, **kwargs) -> ContentParseResult:
+        start_time = time.time()
+
         try:
-            parsed_url = urlparse(source)
-            if not parsed_url.scheme or not parsed_url.netloc:
-                return ContentParseResult("", error=f"Invalid URL: {source}")
+            validate_url(source)
+            logger.info("web_parse_started", url=source)
 
-            try:
-                response = requests.get(
-                    source,
-                    headers=self.headers,
-                    timeout=self.timeout,
-                    allow_redirects=True
-                )
-                response.raise_for_status()
-            except requests.exceptions.Timeout:
-                return ContentParseResult("", error="Request timed out")
-            except requests.exceptions.RequestException as e:
-                return ContentParseResult("", error=f"Failed to fetch URL: {str(e)}")
+            response = await self.fetcher.fetch_content(source)
+            content = self.processor.process_response(response)
+            metadata = self.processor.build_metadata(source, response, content)
 
-            content_type = response.headers.get("content-type", "").lower()
-            if "text/html" not in content_type:
-                return ContentParseResult("", error=f"Unsupported content type: {content_type}")
-
-            soup = BeautifulSoup(response.content, "html.parser")
-
-            for script in soup(["script", "style", "nav", "header", "footer"]):
-                script.decompose()
-
-            title = soup.title.string.strip() if soup.title else parsed_url.netloc
-            content = self._extract_main_content(soup)
-
-            if len(content) > self.max_content_length:
-                content = content[:self.max_content_length] + "... [Content truncated]"
-
-            if not content.strip():
-                return ContentParseResult("", error="No readable content found on webpage")
-
-            metadata = self._extract_metadata(soup, response, source)
-            metadata["source_type"] = "web_url"
+            processing_time = time.time() - start_time
+            logger.info("web_parse_completed", url=source, processing_time=round(processing_time, 2))
 
             return ContentParseResult(
-                content=content.strip(),
-                title=title,
+                content=content,
+                title=metadata.get("title"),
                 metadata=metadata
             )
 
-        except Exception as e:
-            return ContentParseResult("", error=f"Failed to parse web content: {str(e)}")
+        except (ValidationError, NetworkError, ParsingError) as e:
+            logger.error("web_parse_failed", error=str(e), url=source)
+            return ContentParseResult("", error=str(e))
 
-    def _extract_main_content(self, soup: BeautifulSoup) -> str:
-        content_parts = []
-
-        main_selectors = [
-            "main",
-            "article",
-            ".content",
-            ".main-content",
-            "#content",
-            "#main",
-            ".post-content",
-            ".entry-content"
-        ]
-
-        main_content = None
-        for selector in main_selectors:
-            elements = soup.select(selector)
-            if elements:
-                main_content = elements[0]
-                break
-
-        if main_content is None:
-            main_content = soup.body or soup
-
-        for element in main_content.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "div"]):
-            text = element.get_text(strip=True)
-            if text and len(text) > 20:  # Filter out very short text
-                content_parts.append(text)
-
-        return "\n\n".join(content_parts)
-
-    def _extract_metadata(self, soup: BeautifulSoup, response: requests.Response, url: str) -> Dict[str, Any]:
-        metadata = {
-            "url": url,
-            "status_code": response.status_code,
-            "content_type": response.headers.get("content-type"),
-            "content_length": len(response.content),
-        }
-
-        description = soup.find("meta", attrs={"name": "description"})
-        if description:
-            metadata["description"] = description.get("content", "")
-
-        author = soup.find("meta", attrs={"name": "author"})
-        if author:
-            metadata["author"] = author.get("content", "")
-
-        keywords = soup.find("meta", attrs={"name": "keywords"})
-        if keywords:
-            metadata["keywords"] = keywords.get("content", "")
-
-        og_title = soup.find("meta", property="og:title")
-        if og_title:
-            metadata["og_title"] = og_title.get("content", "")
-
-        og_description = soup.find("meta", property="og:description")
-        if og_description:
-            metadata["og_description"] = og_description.get("content", "")
-
-        metadata["domain"] = urlparse(url).netloc
-        metadata["extraction_time"] = time.time()
-
-        return metadata
+    def _build_metadata(self, url: str, domain: str, response, content: str) -> dict:
+        return self.processor.build_metadata(url, response, content)
 
     def supports_source(self, source: str) -> bool:
-        try:
-            parsed = urlparse(source)
-            return bool(parsed.scheme and parsed.netloc)
-        except Exception:
-            return False
+        return supports_web_url(source)
 
     @property
     def supported_types(self) -> list[str]:

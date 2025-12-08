@@ -320,7 +320,7 @@ async def delete_all_jobs(
 @router.get("/supported-types")
 async def get_supported_types():
     return {
-        "supported_types": ["youtube", "pdf", "docx", "web_url"],
+        "supported_types": ["youtube", "web_url", "collection", "files"],
         "file_limits": {
             "pdf": "10MB",
             "docx": "5MB",
@@ -440,3 +440,34 @@ async def submit_job_quiz(
         logger.error("Failed to submit quiz", job_id=job_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to evaluate quiz submission")
 
+
+
+
+router.get("/{job_id}/quiz/results", response_model=QuizEvaluationResult)
+async def get_job_quiz_results(
+    job_id: int,
+    repo = Depends(get_content_job_repository),
+    quiz_repo = Depends(get_quiz_repository)
+) -> QuizEvaluationResult:
+    try:
+        job = job_utils.check_job_exists(job_id, repo)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        quiz_questions_db = quiz_repo.get_questions_by_job_id(job_id)
+        if not quiz_questions_db:
+            raise HTTPException(status_code=500, detail="Content not found - quiz questions were not generated during processing")
+
+        return QuizEvaluationResult(
+            total_score=job.total_score,
+            max_possible_score=job.max_possible_score,
+            percentage=job.percentage,
+            results=job.results
+        )
+    except JobNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get quiz results", job_id=job_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to retrieve quiz results")
