@@ -16,8 +16,8 @@ logger = structlog.get_logger(__name__)
 class ContentParsingCoordinator:
     def __init__(self, db_session):
         self.parser_factory = ContentParserFactory()
-        self.file_storage = FileStorageService()
         self.file_repository = FileRepository(db_session)
+        self.file_storage = FileStorageService(self.file_repository)
 
     async def parse_all_content_sources(self, input_sources: List[Dict[str, Any]], user_id: str) -> List[Any]:
         validate_input_sources(input_sources)
@@ -36,7 +36,7 @@ class ContentParsingCoordinator:
 
         return processed_results
 
-    def _create_parse_tasks(self, input_sources: List[Dict[str, Any]]) -> List[asyncio.Task]:
+    def _create_parse_tasks(self, input_sources: List[Dict[str, Any]], user_id: str) -> List[asyncio.Task]:
         tasks = []
         for source in input_sources:
             content_type = source["content_type"]
@@ -138,7 +138,6 @@ class ContentParsingCoordinator:
 
             file_path = Path(self.file_storage.get_file_path(uploaded_file.file_path))
 
-            # Prefer explicit parser; if not, detect based on filename/extension (for generic "files").
             parser = self.parser_factory.get_parser(content_type)
             if not parser:
                 detected_type = self.parser_factory.detect_input_type(str(file_path), file_path.name)

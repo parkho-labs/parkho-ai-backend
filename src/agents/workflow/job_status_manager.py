@@ -4,7 +4,6 @@ import structlog
 
 from ...api.v1.schemas import JobStatus
 from ...utils.database_utils import DatabaseService
-from ...core.websocket_manager import websocket_manager
 from ...exceptions import JobError
 
 logger = structlog.get_logger(__name__)
@@ -35,8 +34,6 @@ class JobStatusManager:
 
             self.db_service.update_job(job)
 
-            await self._notify_status_change(job_id, status, job.progress, message)
-
             logger.info("job_status_updated",
                        job_id=job_id,
                        status=status.value,
@@ -51,29 +48,16 @@ class JobStatusManager:
             raise JobError(f"Failed to update job status: {str(e)}")
 
     async def mark_job_started(self, job_id: int) -> None:
-        await self.update_job_status(job_id, JobStatus.PROCESSING, progress=0.0, message="Job started")
+        await self.update_job_status(job_id, JobStatus.RUNNING, progress=0.0, message="Job started")
 
     async def mark_job_completed(self, job_id: int, **kwargs) -> None:
-        await self.update_job_status(job_id, JobStatus.COMPLETED, progress=100.0, message="Job completed successfully", **kwargs)
+        await self.update_job_status(job_id, JobStatus.SUCCESS, progress=100.0, message="Job completed successfully", **kwargs)
 
     async def mark_job_failed(self, job_id: int, error_message: str) -> None:
         await self.update_job_status(job_id, JobStatus.FAILED, message=f"Job failed: {error_message}")
 
     async def update_job_progress(self, job_id: int, progress: float, message: str = None) -> None:
-        await self.update_job_status(job_id, JobStatus.PROCESSING, progress=progress, message=message)
-
-    async def _notify_status_change(self, job_id: int, status: JobStatus, progress: float, message: str = None) -> None:
-        notification = {
-            "job_id": job_id,
-            "status": status.value,
-            "progress": progress,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-
-        if message:
-            notification["message"] = message
-
-        await websocket_manager.send_job_update(job_id, notification)
+        await self.update_job_status(job_id, JobStatus.RUNNING, progress=progress, message=message)
 
     def get_job(self, job_id: int):
         return self.db_service.get_job(job_id)

@@ -46,6 +46,11 @@ class AudioCacheService:
             "total_size_mb": 0.0
         }
 
+    @property
+    def is_enabled(self) -> bool:
+        """Check if audio caching is enabled."""
+        return True
+
         # Create cache directory if it doesn't exist
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
