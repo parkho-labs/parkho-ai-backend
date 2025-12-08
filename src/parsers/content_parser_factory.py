@@ -3,7 +3,7 @@ from .base_parser import BaseContentParser
 from .pdf_parser import PDFParser
 from .docx_parser import DOCXParser
 from .web_parser import WebParser
-from .youtube_parser import YouTubeParser
+from .youtube import YouTubeParser
 from .collection_parser import CollectionParser
 
 
@@ -20,25 +20,10 @@ class ContentParserFactory:
     def get_parser(self, input_type: str) -> Optional[BaseContentParser]:
         return self._parsers.get(input_type.lower())
 
-    #REVISIT - can have a better way for this, instead od comparing string.. that takes time. 
     def detect_input_type(self, source: str, filename: Optional[str] = None) -> Optional[str]:
-        if filename:
-            filename_lower = filename.lower()
-            if filename_lower.endswith(".pdf"):
-                return "pdf"
-            elif filename_lower.endswith((".docx", ".doc")):
-                return "docx"
-
-        source_lower = source.lower()
-
-        if source_lower.endswith(".pdf"):
-            return "pdf"
-        elif source_lower.endswith((".docx", ".doc")):
-            return "docx"
-
-        if source_lower.startswith(("http://", "https://")):
-            return "web_url"
-
+        for parser_type, parser in self._parsers.items():
+            if parser.supports_source(filename or source):
+                return parser_type
         return None
 
     def get_supported_types(self) -> list[str]:
