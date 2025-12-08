@@ -129,10 +129,9 @@ class WorkflowOrchestrator:
             if isinstance(questions_data, dict) and "questions" in questions_data:
                 questions_list = questions_data["questions"]
 
-                for question_data in questions_list:
-                    await self.question_generator.save_question(job_id, question_data)
-
-                logger.info("questions_saved", job_id=job_id, count=len(questions_list))
+                if questions_list:
+                    await self.question_generator.save_questions_bulk(job_id, questions_list)
+                    logger.info("questions_saved", job_id=job_id, count=len(questions_list))
 
         except Exception as e:
             logger.warning("question_saving_failed", job_id=job_id, error=str(e))

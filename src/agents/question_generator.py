@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import structlog
 
 from .base import ContentTutorAgent
@@ -73,41 +73,58 @@ class QuestionGeneratorAgent(ContentTutorAgent):
 
 
     async def save_quiz_questions(self, job_id: int, questions: List[Dict[str, Any]]):
+        """Backwards-compatible batch save for generated questions."""
+        await self.save_questions_bulk(job_id, questions)
+
+    async def save_questions_bulk(self, job_id: int, questions: List[Dict[str, Any]]):
+        """Insert all questions for a job in a single transaction."""
+        if not questions:
+            return
+
         db = SessionLocal()
         try:
             quiz_repo = QuizRepository(db)
-
-            questions_data = []
-            for i, q in enumerate(questions):
-                # Store options in answer_config for storage
-                answer_config = q["answer_config"].copy()
-                if "question_config" in q and "options" in q["question_config"]:
-                    answer_config["options"] = q["question_config"]["options"]
-
-                # Store metadata separately in question_metadata field
-                question_metadata = None
-                if "metadata" in q and q["metadata"]:
-                    question_metadata = q["metadata"].copy()
-
-                question_data = {
-                    "job_id": job_id,
-                    "question_id": q.get("question_id", f"q{i+1}"),
-                    "question": q["question"],
-                    "type": q["question_config"]["type"],
-                    "answer_config": answer_config,
-                    "question_metadata": question_metadata,
-                    "context": q.get("context", ""),
-                    "max_score": q.get("max_score", 1)
-                }
-                questions_data.append(question_data)
-
-            if questions_data:
-                quiz_repo.create_questions_batch(questions_data)
-
+            questions_data = [self._build_question_payload(job_id, q, idx) for idx, q in enumerate(questions)]
+            quiz_repo.create_questions_batch(questions_data)
         except Exception:
             db.rollback()
-            logger.error("Failed to save quiz questions", job_id=job_id, exc_info=True)
+            logger.error("Failed to save quiz questions in bulk", job_id=job_id, exc_info=True)
             raise
         finally:
             db.close()
+
+    async def save_question(self, job_id: int, question: Dict[str, Any], index: int = 0):
+        """Single-question save (used for compatibility/fallback)."""
+        db = SessionLocal()
+        try:
+            quiz_repo = QuizRepository(db)
+            payload = self._build_question_payload(job_id, question, index)
+            quiz_repo.create_questions_batch([payload])
+        except Exception:
+            db.rollback()
+            logger.error("Failed to save single quiz question", job_id=job_id, exc_info=True)
+            raise
+        finally:
+            db.close()
+
+    def _build_question_payload(self, job_id: int, question: Dict[str, Any], index: int) -> Dict[str, Any]:
+        answer_config = question.get("answer_config", {}).copy()
+        # Include options if present in question_config
+        if "question_config" in question and "options" in question["question_config"]:
+            answer_config["options"] = question["question_config"]["options"]
+
+        question_metadata: Optional[Dict[str, Any]] = None
+        if "metadata" in question and question["metadata"]:
+            question_metadata = question["metadata"].copy()
+
+        return {
+            "job_id": job_id,
+            "question_id": question.get("question_id", f"q{index+1}"),
+            "question": question.get("question", ""),
+            "type": question.get("question_config", {}).get("type"),
+            "answer_config": answer_config,
+            "question_metadata": question_metadata,
+            "context": question.get("context", ""),
+            "max_score": question.get("max_score", 1),
+        }
 

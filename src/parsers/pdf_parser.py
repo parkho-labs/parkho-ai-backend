@@ -2,11 +2,12 @@ import os
 import time
 import structlog
 import pymupdf4llm
+import fitz  # PyMuPDF
 
 from .base_parser import BaseContentParser, ContentParseResult
 from ..exceptions import FileProcessingError, ParsingError
 from ..utils.file_utils import validate_file_exists, validate_file_size, extract_filename, extract_title
-from ..utils.string_utils import extract_content_from_markdown, count_pages_from_content
+from ..utils.string_utils import extract_content_from_markdown
 
 
 logger = structlog.get_logger(__name__)
@@ -25,9 +26,13 @@ class PDFParser(BaseContentParser):
 
             logger.info("pdf_parse_started", file_name=file_name)
 
+            # Get page count directly from PDF to avoid relying on markdown formatting
+            with fitz.open(source) as doc:
+                page_count = doc.page_count
+
             md_text = self._extract_markdown(source)
             content = extract_content_from_markdown(md_text)
-            metadata = self._build_metadata(source, file_size, content)
+            metadata = self._build_metadata(source, file_size, content, page_count)
 
             processing_time = time.time() - start_time
             logger.info("pdf_parse_completed", file_name=file_name, processing_time=round(processing_time, 2))
@@ -52,11 +57,11 @@ class PDFParser(BaseContentParser):
         except Exception as e:
             raise ParsingError(f"Failed to extract text from PDF: {str(e)}")
 
-    def _build_metadata(self, file_path: str, file_size: int, content: str) -> dict:
+    def _build_metadata(self, file_path: str, file_size: int, content: str, page_count: int) -> dict:
         return {
             "file_name": extract_filename(file_path),
             "file_size": file_size,
-            "page_count": count_pages_from_content(content),
+            "page_count": page_count,
             "title": extract_title(file_path),
             "source_type": "pdf",
             "content_length": len(content)
