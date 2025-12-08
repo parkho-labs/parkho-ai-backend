@@ -57,6 +57,8 @@ def get_llm_service() -> LLMService:
         openai_api_key=settings.openai_api_key,
         anthropic_api_key=settings.anthropic_api_key,
         google_api_key=settings.google_api_key,
+        openai_model_name=settings.openai_model_name,
+        anthropic_model_name=settings.anthropic_model_name,
         google_model_name=settings.google_model_name
     )
 

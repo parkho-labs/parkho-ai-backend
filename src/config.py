@@ -105,13 +105,93 @@ class Settings(BaseSettings):
 
     # LLM Question Generation
     question_generation_temperature: float = Field(default=0.7, description="LLM temperature for question generation")
-    question_generation_max_tokens: int = Field(default=4000, description="Max tokens for question generation")
+    question_generation_max_tokens: int = Field(default=10000, description="Max tokens for question generation")
     preferred_question_provider: str = Field(default="openai", description="Preferred LLM provider for questions")
+
+    # LLM Model Names
+    openai_model_name: str = Field(default="gpt-4o-mini", description="OpenAI model name")
+    anthropic_model_name: str = Field(default="claude-3-haiku-20240307", description="Anthropic Claude model name")
     google_model_name: str = Field(default="gemini-1.5-flash-latest", description="Google Gemini model name")
 
     # Demo Mode Configuration
     demo_mode: bool = Field(default=False, description="Enable demo mode for development")
     demo_user_id: str = Field(default="demo-user-123", description="Default demo user ID")
+
+    # YouTube Audio Caching Configuration
+    youtube_audio_cache_enabled: bool = Field(
+        default=True,
+        description="Enable audio caching for YouTube videos"
+    )
+    youtube_audio_cache_dir: str = Field(
+        default="youtube_audio",
+        description="Directory name for cached YouTube audio files (relative to temp_files_dir)"
+    )
+    youtube_audio_cache_ttl_days: int = Field(
+        default=7,
+        description="Time-to-live for cached audio files in days"
+    )
+    max_audio_file_size_mb: int = Field(
+        default=500,
+        description="Maximum audio file size in MB"
+    )
+
+    # YouTube Download Settings
+    youtube_download_timeout_seconds: int = Field(
+        default=180,
+        description="Timeout for YouTube audio download (3 minutes)"
+    )
+    youtube_audio_format: str = Field(
+        default="mp3",
+        description="Audio format for downloaded files (mp3, m4a)"
+    )
+    youtube_audio_quality: str = Field(
+        default="bestaudio",
+        description="Audio quality for yt-dlp (bestaudio, worstaudio)"
+    )
+
+    # YouTube Transcription Settings
+    youtube_transcription_timeout_seconds: int = Field(
+        default=300,
+        description="Timeout for audio transcription (5 minutes)"
+    )
+    youtube_transcription_language: str = Field(
+        default="en",
+        description="Primary language for transcription"
+    )
+
+    # YouTube Fallback Settings
+    youtube_gemini_fallback_enabled: bool = Field(
+        default=True,
+        description="Enable Gemini fallback when audio/transcription fails"
+    )
+    youtube_gemini_fallback_timeout_seconds: int = Field(
+        default=120,
+        description="Timeout for Gemini fallback processing (2 minutes)"
+    )
+
+    # YouTube Native Transcript Settings
+    youtube_use_native_transcripts: bool = Field(
+        default=False,
+        description="Try YouTube native transcripts first (yt-dlp)"
+    )
+    youtube_cookies_file: str = Field(
+        default="cookies.txt",
+        description="Path to cookies.txt for YouTube authentication (bypasses bot detection)"
+    )
+    youtube_native_transcript_timeout_seconds: int = Field(
+        default=30,
+        description="Timeout for YouTube native transcript extraction"
+    )
+
+    # Cache Management
+    youtube_cache_cleanup_enabled: bool = Field(
+        default=True,
+        description="Enable automatic cache cleanup"
+    )
+    youtube_cache_cleanup_interval_hours: int = Field(
+        default=24,
+        description="Interval for automatic cache cleanup in hours"
+    )
 
     # Content Processing Strategy Configuration
     content_processing_strategy: str = Field(
@@ -133,12 +213,12 @@ class Settings(BaseSettings):
 
     # Gemini Video API Configuration
     gemini_video_api_enabled: bool = Field(
-        default=False,
+        default=True,
         description="Enable Google Gemini video understanding API"
     )
     gemini_video_model_name: str = Field(
-        default="gemini-1.5-pro",
-        description="Gemini model for video processing"
+        default="gemini-2.5-flash",
+        description="Gemini model for video processing (gemini-2.0-flash-exp supports YouTube URLs)"
     )
     gemini_video_timeout_seconds: int = Field(
         default=180,
