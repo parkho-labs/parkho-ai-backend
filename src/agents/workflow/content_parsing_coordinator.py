@@ -34,18 +34,17 @@ class ContentParsingCoordinator:
 
         return processed_results
 
-    def _create_parse_tasks(self, input_sources: List[Dict[str, Any]], user_id: str) -> List[asyncio.Task]:
+    def _create_parse_tasks(self, input_sources: List[Dict[str, Any]]) -> List[asyncio.Task]:
         tasks = []
+        url_based_types = {"youtube", "web_url"}
         for source in input_sources:
             content_type = source["content_type"]
             source_id = source["id"]
 
-            if content_type == "youtube":
-                task = asyncio.create_task(self._parse_url(content_type, source_id, user_id))
-            elif content_type == "web_url":
-                task = asyncio.create_task(self._parse_url(content_type, source_id, user_id))
+            if content_type in url_based_types:
+                task = asyncio.create_task(self._parse_url(content_type, source_id))
             else:
-                task = asyncio.create_task(self._parse_file(content_type, source_id, user_id))
+                task = asyncio.create_task(self._parse_file(content_type, source_id))
 
             tasks.append(task)
 
