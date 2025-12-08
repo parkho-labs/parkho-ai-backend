@@ -2,7 +2,7 @@
 Complex Pipeline Strategy
 
 Wraps the existing multi-agent content processing workflow that includes:
-- Parallel content parsing (YouTube, PDF, DOCX, Web)
+ - Parallel content parsing (YouTube, Files, Web, Collections)
 - RAG context retrieval
 - Multi-agent question generation
 - Comprehensive error handling and progress tracking
@@ -25,7 +25,7 @@ class ComplexPipelineStrategy(ContentProcessingStrategy):
     Strategy that uses the existing complex multi-agent processing pipeline.
 
     This strategy provides maximum flexibility and control by:
-    - Supporting all content types (YouTube, PDF, DOCX, Web URLs)
+    - Supporting all content types (YouTube, Web URLs, Collections, Files)
     - Using specialized parsers for each content type
     - Performing parallel content parsing
     - Integrating RAG context when available
@@ -37,7 +37,7 @@ class ComplexPipelineStrategy(ContentProcessingStrategy):
         return "Complex Multi-Agent Pipeline"
 
     def get_supported_content_types(self) -> List[str]:
-        return ["youtube", "pdf", "docx", "web_url", "collection"]
+        return ["youtube", "web_url", "collection", "files"]
 
     def supports_content_type(self, content_type: str) -> bool:
         return content_type in self.get_supported_content_types()
@@ -123,7 +123,7 @@ class ComplexPipelineStrategy(ContentProcessingStrategy):
         Estimate processing time for complex pipeline based on content analysis.
 
         YouTube videos typically take longer due to download + transcription.
-        PDFs and documents are faster to parse.
+        Files (pdf/doc/docx) are faster to parse.
         """
         total_time = 0.0
 
@@ -133,7 +133,7 @@ class ComplexPipelineStrategy(ContentProcessingStrategy):
             if content_type == "youtube":
                 # YouTube: download + transcription + processing
                 total_time += 300.0  # 5 minutes average per video
-            elif content_type in ["pdf", "docx"]:
+            elif content_type in ["files", "pdf", "docx"]:
                 # Document parsing is relatively fast
                 total_time += 30.0  # 30 seconds per document
             elif content_type == "web_url":

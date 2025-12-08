@@ -1,5 +1,6 @@
 import asyncio
 from typing import List, Dict, Any
+from pathlib import Path
 import structlog
 
 from ...parsers.content_parser_factory import ContentParserFactory
@@ -7,6 +8,7 @@ from ...services.file_storage import FileStorageService
 from ...repositories.file_repository import FileRepository
 from ...utils.validation_utils import validate_input_sources, validate_content_results
 from ...exceptions import ParsingError
+from ...api.v1.schemas import InputType
 
 logger = structlog.get_logger(__name__)
 
@@ -36,19 +38,43 @@ class ContentParsingCoordinator:
 
     def _create_parse_tasks(self, input_sources: List[Dict[str, Any]]) -> List[asyncio.Task]:
         tasks = []
-        url_based_types = {"youtube", "web_url"}
         for source in input_sources:
             content_type = source["content_type"]
             source_id = source["id"]
 
-            if content_type in url_based_types:
-                task = asyncio.create_task(self._parse_url(content_type, source_id))
-            else:
-                task = asyncio.create_task(self._parse_file(content_type, source_id))
-
-            tasks.append(task)
+            match content_type:
+                case InputType.YOUTUBE:
+                    tasks.append(asyncio.create_task(self._parse_youtube(source_id, user_id)))
+                case InputType.WEB_URL:
+                    tasks.append(asyncio.create_task(self._parse_web(source_id, user_id)))
+                case InputType.COLLECTION:
+                    tasks.append(asyncio.create_task(self._parse_collection(source_id, user_id)))
+                case InputType.FILES:
+                    tasks.append(asyncio.create_task(self._parse_file(content_type, source_id, user_id)))
+                case _:
+                    logger.warning("unsupported_content_type", content_type=content_type, source_id=source_id)
 
         return tasks
+
+    async def _parse_youtube(self, url: str, user_id: str):
+        return await self._parse_url(InputType.YOUTUBE.value, url, user_id)
+
+    async def _parse_web(self, url: str, user_id: str):
+        return await self._parse_url(InputType.WEB_URL.value, url, user_id)
+
+    async def _parse_collection(self, collection_name: str, user_id: str):
+        try:
+            parser = self.parser_factory.get_parser("collection")
+            if not parser:
+                raise ParsingError("No parser available for collection type")
+
+            result = await parser.parse(collection_name, user_id=user_id)
+            logger.info("collection_parse_completed", collection=collection_name)
+            return result
+
+        except Exception as e:
+            logger.error("collection_parse_failed", collection=collection_name, error=str(e))
+            raise ParsingError(f"Failed to parse collection: {str(e)}")
 
     def _process_parse_results(self, results: List[Any]) -> List[Any]:
         processed = []
@@ -110,26 +136,23 @@ class ContentParsingCoordinator:
             if not uploaded_file:
                 raise ParsingError(f"File {file_id} not found")
 
-            file_path = self.file_storage.get_file_path(uploaded_file.file_path)
+            file_path = Path(self.file_storage.get_file_path(uploaded_file.file_path))
+
+            # Prefer explicit parser; if not, detect based on filename/extension (for generic "files").
             parser = self.parser_factory.get_parser(content_type)
+            if not parser:
+                detected_type = self.parser_factory.detect_input_type(str(file_path), file_path.name)
+                if detected_type:
+                    parser = self.parser_factory.get_parser(detected_type)
+                    content_type = detected_type
 
             if not parser:
                 raise ParsingError(f"No parser available for content type: {content_type}")
 
             result = await parser.parse(str(file_path))
-            logger.info("file_parse_completed", content_type=content_type, file_id=file_id)
+            logger.info("file_parse_completed", content_type=content_type, file_id=file_id, detected_type=content_type)
             return result
 
         except Exception as e:
             logger.error("file_parse_failed", content_type=content_type, file_id=file_id, error=str(e))
             raise ParsingError(f"Failed to parse {content_type} file: {str(e)}")
-
-    def detect_url_type(self, url: str) -> str:
-        url_lower = url.lower()
-
-        if "youtube.com" in url_lower or "youtu.be" in url_lower:
-            return "youtube"
-        elif url_lower.startswith(("http://", "https://")):
-            return "web_url"
-
-        return "unknown"

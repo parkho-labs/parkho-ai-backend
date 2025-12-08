@@ -64,10 +64,9 @@ class LLMProvider(str, Enum):
 
 class InputType(str, Enum):
     YOUTUBE = "youtube"
-    PDF = "pdf"
-    DOCX = "docx"
     WEB_URL = "web_url"
     COLLECTION = "collection"
+    FILES = "files"
 
 
 class ContentSubject(str, Enum):
@@ -98,7 +97,7 @@ class ContentProcessingRequest(BaseModel):
             "example": {
                 "input_config": [
                     {"content_type": "youtube", "id": "https://youtu.be/abc123"},
-                    {"content_type": "pdf", "id": "file-hash-456"}
+                    {"content_type": "files", "id": "file-hash-456"}
                 ],
                 "question_types": {"multiple_choice": 3, "short_answer": 2},
                 "difficulty_level": "intermediate",
