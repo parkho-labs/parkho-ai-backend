@@ -15,7 +15,6 @@ from ..core.database import get_db
 from ..repositories.content_job_repository import ContentJobRepository
 from ..repositories.quiz_repository import QuizRepository
 from ..api.v1.schemas import JobStatus
-from ..core.websocket_manager import websocket_manager
 
 logger = structlog.get_logger(__name__)
 
@@ -102,8 +101,8 @@ class DirectGeminiStrategy(ContentProcessingStrategy):
                 # Combine results from multiple videos
                 combined_result = self._combine_results(processed_results, youtube_urls)
 
-                # Save results to database
-                await self._save_results_to_job(job_id, combined_result, repo)
+                # Save results to database - REMOVED: let orchestrator handle it
+                # await self._save_results_to_job(job_id, combined_result, repo)
 
                 await self._update_progress(job_id, 100, "Gemini analysis completed successfully")
 
@@ -187,21 +186,35 @@ class DirectGeminiStrategy(ContentProcessingStrategy):
         Build comprehensive prompt for Gemini video analysis.
         """
         num_questions = job_config.get("num_questions", 10)
-        question_types = job_config.get("question_types", ["multiple_choice"])
+        question_types = job_config.get("question_types", {"multiple_choice": 10})
         difficulty_level = job_config.get("difficulty_level", "intermediate")
         generate_summary = job_config.get("generate_summary", True)
+
+        # Construct question requirements string
+        if isinstance(question_types, dict):
+            # Format: "X multiple_choice, Y true_false"
+            type_reqs = []
+            for q_type, count in question_types.items():
+                type_reqs.append(f"{count} {q_type}")
+            question_requirements = ", ".join(type_reqs)
+        else:
+            # Fallback if list
+            question_requirements = ", ".join(question_types)
 
         prompt = f"""
 Analyze this YouTube video and provide a comprehensive educational analysis.
 
-IMPORTANT: Return ONLY valid JSON. Do not wrap in markdown code blocks or add any text before/after the JSON.
+IMPORTANT: Return ONLY valid JSON. 
+- You MUST properly escape all double quotes within strings (e.g., "The \\"quoted\\" word").
+- Do not wrap in markdown code blocks.
+- Do not add any text before or after the JSON.
 
 Return EXACTLY this JSON structure:
 
 {{
     "title": "Video title",
-    "transcript": "Full transcript of the video content",
-    "summary": "2-3 paragraph summary of the main concepts and key points",
+    "transcript": "Full transcript of the video content (ensure all quotes are escaped)",
+    "summary": "2-3 paragraph summary (ensure all quotes are escaped)",
     "questions": [
         {{
             "question_id": "q1",
@@ -216,24 +229,23 @@ Return EXACTLY this JSON structure:
         }}
     ],
     "metadata": {{
-        "duration": "Video duration in seconds if available",
-        "subject": "Detected subject (Physics, Mathematics, Chemistry, Biology, General)",
-        "difficulty_assessed": "Assessed difficulty level",
-        "key_topics": ["List of key topics covered"]
+        "duration": "Duration",
+        "subject": "detected subject",
+        "difficulty_assessed": "difficulty",
+        "key_topics": ["topic1", "topic2"]
     }}
 }}
 
 CRITICAL REQUIREMENTS:
-- "options" MUST be an object/dictionary with keys A, B, C, D (NOT an array)
-- Example: {{"A": "Answer 1", "B": "Answer 2", "C": "Answer 3", "D": "Answer 4"}}
-- Do NOT use: ["Answer 1", "Answer 2", "Answer 3", "Answer 4"]
-- Generate exactly {num_questions} questions
-- Question types: {', '.join(question_types)}
+- "options" MUST be an object with keys A, B, C, D.
+- Generate exactly {num_questions} questions.
+- Question types distribution: {question_requirements}
 - Difficulty level: {difficulty_level}
 - {'Include a comprehensive summary' if generate_summary else 'Summary not required'}
-- Return ONLY the JSON object, nothing else
+- ESCAPE ALL DOUBLE QUOTES inside strings with backslash (\\").
+- Return ONLY the raw JSON string.
 
-Focus on creating high-quality educational content that helps learners understand and retain the key concepts presented in the video.
+Focus on creating high-quality educational content.
 """
 
         return prompt.strip()
@@ -290,7 +302,38 @@ Focus on creating high-quality educational content that helps learners understan
                 return self._extract_from_text_response(cleaned_response, url)
 
         except json.JSONDecodeError as e:
-            logger.warning("Failed to parse Gemini response as JSON, falling back to text extraction", error=str(e))
+            logger.warning("Failed to parse Gemini response as JSON", error=str(e))
+            
+            # Attempt to rescue questions even if full JSON is invalid
+            try:
+                # Robust extraction using JSONDecoder to handle nested brackets correctly
+                # Find "questions" key and the opening bracket with flexible whitespace
+                match = re.search(r'"questions"\s*:\s*\[', cleaned_response)
+                
+                if match:
+                    # Start decoding from the opening bracket '['
+                    # match.end() gives index after '[', so match.end()-1 is the '['
+                    start_pos = match.end() - 1
+                    questions, _ = json.JSONDecoder().raw_decode(cleaned_response[start_pos:])
+                    
+                    logger.info("Successfully extracted questions using raw_decode", count=len(questions))
+                    
+                    # Return partial structured result
+                    return {
+                        "title": "YouTube Video Analysis (Partial Parse)",
+                        "transcript": cleaned_response, # Fallback to full text
+                        "summary": "Summary unavailable due to parsing error", 
+                        "questions": questions,
+                        "metadata": {
+                            "source_url": url,
+                            "processing_method": "direct_gemini",
+                            "parsing_note": "Partial parse: questions recovered from invalid JSON"
+                        }
+                    }
+            except Exception as rescue_error:
+                logger.warning("Failed to rescue questions from invalid JSON", error=str(rescue_error))
+
+            logger.warning("Falling back to text extraction")
             return self._extract_from_text_response(cleaned_response, url)
 
     def _extract_from_text_response(self, response: str, url: str) -> Dict[str, Any]:
@@ -360,64 +403,7 @@ Focus on creating high-quality educational content that helps learners understan
             "metadata": combined_metadata
         }
 
-    async def _save_results_to_job(
-        self,
-        job_id: int,
-        results: Dict[str, Any],
-        repo: ContentJobRepository
-    ):
-        """Save processing results to the job in database."""
-        job = repo.get_by_id(job_id)
-        if job:
-            # Update output config using the model's method
-            job.update_output_config(
-                content_text=results["content_text"],
-                summary=results["summary"],
-                questions=results["questions"],
-                metadata=results["metadata"]
-            )
 
-            # Create QuizQuestion records in database
-            questions = results.get("questions", [])
-            logger.info(
-                "Processing questions for database save",
-                job_id=job_id,
-                question_count=len(questions),
-                has_questions=bool(questions)
-            )
-            if questions:
-                quiz_repo = QuizRepository(repo.session)
-
-                # Prepare questions for batch insert
-                questions_data = []
-                for idx, q in enumerate(questions):
-                    question_data = {
-                        "job_id": job_id,
-                        "question_id": q.get("question_id", q.get("id", f"q_{idx+1}")),
-                        "question": q.get("question", ""),
-                        "type": q.get("type", "multiple_choice"),
-                        "answer_config": q.get("answer_config", {}),
-                        "context": q.get("context", ""),
-                        "max_score": q.get("max_score", 1)
-                    }
-                    questions_data.append(question_data)
-
-                logger.info(
-                    "Prepared questions for batch insert",
-                    job_id=job_id,
-                    sample_question=questions_data[0] if questions_data else None
-                )
-
-                # Save questions to database
-                quiz_repo.create_questions_batch(questions_data)
-                logger.info(
-                    "Questions saved to database",
-                    job_id=job_id,
-                    question_count=len(questions_data)
-                )
-
-            # Mark as success and commit
-            repo.mark_success(job_id)
 
     async def _update_progress(
         self,
@@ -426,7 +412,7 @@ Focus on creating high-quality educational content that helps learners understan
         message: str,
         status: str = JobStatus.RUNNING
     ):
-        """Update job progress and broadcast via WebSocket."""
+        """Update job progress (polling only, no websocket broadcast)."""
         db_session = next(get_db())
         try:
             repo = ContentJobRepository(db_session)
@@ -434,15 +420,6 @@ Focus on creating high-quality educational content that helps learners understan
 
             if status == "failed":
                 repo.mark_failed(job_id, message)
-
-            # Broadcast progress update
-            await websocket_manager.broadcast_to_job(job_id, {
-                "type": "progress_update",
-                "job_id": job_id,
-                "progress": progress,
-                "message": message,
-                "status": status
-            })
 
         finally:
             db_session.close()

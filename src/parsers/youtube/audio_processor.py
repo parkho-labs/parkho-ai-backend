@@ -18,16 +18,16 @@ class AudioProcessor:
         self.max_file_size_bytes = max_file_size_mb * 1024 * 1024
 
     async def get_audio_file(self, video_id: str, url: str) -> Path:
-        if self.audio_cache.is_enabled():
-            cached_path = await self.audio_cache.get_cached_audio_path(video_id)
+        if self.audio_cache.is_enabled:
+            cached_path = await self.audio_cache.get_cached_audio(video_id)
             if cached_path and cached_path.exists():
                 logger.info("audio_cache_hit", video_id=video_id)
                 return cached_path
 
         audio_path = await self._download_audio(url, video_id)
 
-        if self.audio_cache.is_enabled():
-            await self.audio_cache.cache_audio_file(video_id, audio_path)
+        if self.audio_cache.is_enabled:
+            await self.audio_cache.cache_audio(video_id, audio_path)
 
         return audio_path
 
@@ -38,7 +38,7 @@ class AudioProcessor:
         def _download_sync():
             ydl_opts = {
                 'format': 'bestaudio/best',
-                'outtmpl': str(output_path),
+                'outtmpl': str(output_path.with_suffix('')),
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',

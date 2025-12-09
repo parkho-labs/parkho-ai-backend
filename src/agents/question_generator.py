@@ -48,9 +48,7 @@ class QuestionGeneratorAgent(ContentTutorAgent):
             )
 
             all_questions = agent_result.get("questions", [])
-            await self.update_job_progress(job_id, 90.0, "Saving questions")
-            await self.save_quiz_questions(job_id, all_questions)
-
+            
             data["questions"] = all_questions
             data["total_questions"] = len(all_questions)
             data["total_score"] = len(all_questions)
@@ -108,10 +106,22 @@ class QuestionGeneratorAgent(ContentTutorAgent):
             db.close()
 
     def _build_question_payload(self, job_id: int, question: Dict[str, Any], index: int) -> Dict[str, Any]:
+        # Handle answer_config - prefer top-level, then merge/fallback to question_config
         answer_config = question.get("answer_config", {}).copy()
-        # Include options if present in question_config
-        if "question_config" in question and "options" in question["question_config"]:
-            answer_config["options"] = question["question_config"]["options"]
+        
+        q_config = question.get("question_config", {})
+        if q_config and isinstance(q_config, dict):
+            # If options are in question_config but not answer_config, copy them
+            if "options" in q_config and "options" not in answer_config:
+                answer_config["options"] = q_config["options"]
+            # If correct_answer is in question_config but not answer_config
+            if "correct_answer" in q_config and "correct_answer" not in answer_config:
+                answer_config["correct_answer"] = q_config["correct_answer"]
+
+        # Extract type - separate logic to try top-level first (common in direct strategies), then question_config
+        question_type = question.get("type")
+        if not question_type:
+            question_type = q_config.get("type") if q_config else None
 
         question_metadata: Optional[Dict[str, Any]] = None
         if "metadata" in question and question["metadata"]:
@@ -121,7 +131,7 @@ class QuestionGeneratorAgent(ContentTutorAgent):
             "job_id": job_id,
             "question_id": question.get("question_id", f"q{index+1}"),
             "question": question.get("question", ""),
-            "type": question.get("question_config", {}).get("type"),
+            "type": question_type,
             "answer_config": answer_config,
             "question_metadata": question_metadata,
             "context": question.get("context", ""),

@@ -48,6 +48,12 @@ class ContentJobRepository:
         self.session.refresh(job)
         return job
 
+    def update(self, job: ContentJob) -> ContentJob:
+        """Persist changes to an existing job."""
+        self.session.commit()
+        self.session.refresh(job)
+        return job
+
     def delete_job(self, job_id: int) -> bool:
         job = self.get(job_id)
         if job:

@@ -152,14 +152,7 @@ class ContentProcessorService:
 
             db.commit()
 
-            # Send WebSocket completion notification
-            from ..core.websocket_manager import websocket_manager
-            await websocket_manager.broadcast_to_job(job_id, {
-                "type": "completion",
-                "status": "completed",
-                "message": "Question generation completed! Your results are ready.",
-                "progress": 100.0
-            })
+            # WebSocket notifications removed
 
         except Exception:
             db.rollback()

@@ -4,7 +4,6 @@ from datetime import datetime
 
 from ..models.content_job import ContentJob
 from ..core.database import SessionLocal
-from ..core.websocket_manager import websocket_manager
 from ..api.v1.schemas import JobStatus
 
 logger = structlog.get_logger(__name__)
@@ -27,7 +26,6 @@ class ContentTutorAgent:
                 job.progress = progress
                 job.status = JobStatus.RUNNING
             db.commit()
-            await self._push_progress_update(job_id, progress, message or f"Processing with {self.name}")
         except Exception:
             db.rollback()
             raise
@@ -50,12 +48,5 @@ class ContentTutorAgent:
             db.close()
 
     async def _push_progress_update(self, job_id: int, progress: float, message: str):
-        try:
-            await websocket_manager.broadcast_to_job(job_id, {
-                "type": "progress_update",
-                "progress": progress,
-                "stage": message,
-                "agent": self.name
-            })
-        except Exception as e:
-            logger.error("Failed to push WebSocket progress update", job_id=job_id, error=str(e))
+        # No-op: websocket push removed (polling used)
+        return

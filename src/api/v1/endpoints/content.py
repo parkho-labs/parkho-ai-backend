@@ -84,10 +84,14 @@ async def process_content(
                 "id": input_item.id
             })
 
+        # Calculate total number of questions from question_types dictionary
+        total_questions = sum(request.question_types.values()) if request.question_types else 5
+
         job.set_input_config(
             input_config=input_config_data,
             question_types=request.question_types,
             difficulty_level=request.difficulty_level.value,
+            num_questions=total_questions,
             generate_summary=request.generate_summary,
             llm_provider=request.llm_provider.value
         )
