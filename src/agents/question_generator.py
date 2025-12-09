@@ -107,7 +107,7 @@ class QuestionGeneratorAgent(ContentTutorAgent):
 
     def _build_question_payload(self, job_id: int, question: Dict[str, Any], index: int) -> Dict[str, Any]:
         # Handle answer_config - prefer top-level, then merge/fallback to question_config
-        answer_config = question.get("answer_config", {}).copy() if question.get("answer_config") else {}
+        answer_config = question.get("answer_config", {}).copy()
         
         q_config = question.get("question_config", {})
         if q_config and isinstance(q_config, dict):
