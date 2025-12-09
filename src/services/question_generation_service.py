@@ -24,9 +24,10 @@ class QuestionGenerationService:
 
     async def generate_questions(self, subject: str = None, content: str = "",
                                question_config: Dict[str, int] = {},
-                               difficulty_level: str = "intermediate") -> Dict[str, Any]:
+                               difficulty_level: str = "intermediate",
+                               user_profile: str = "") -> Dict[str, Any]:
         try:
-            prompt = self._get_prompt(subject, content, question_config, difficulty_level)
+            prompt = self._get_prompt(subject, content, question_config, difficulty_level, user_profile)
 
             response = await self.llm_service.generate_with_fallback(
                 system_prompt="You are an expert educator. Generate educational questions based on the provided content.",
@@ -51,7 +52,7 @@ class QuestionGenerationService:
             logger.error(f"Question generation failed: {str(e)}", exc_info=True)
             return {"questions": [], "total_questions": 0, "total_score": 0}
 
-    def _get_prompt(self, subject: str, content: str, question_config: Dict[str, int], difficulty_level: str) -> str:
+    def _get_prompt(self, subject: str, content: str, question_config: Dict[str, int], difficulty_level: str, user_profile: str) -> str:
         prompt_template = self._get_prompt_template(subject)
 
         question_breakdown = []
@@ -65,7 +66,8 @@ class QuestionGenerationService:
             total_questions=total_questions,
             difficulty=difficulty_level,
             question_breakdown="\n".join(question_breakdown),
-            content=content
+            content=content,
+            user_profile=user_profile or "No specific user profile available. Adapt to general student level."
         )
 
     def _get_prompt_template(self, subject: str) -> str:

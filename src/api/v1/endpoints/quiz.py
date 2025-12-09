@@ -1,11 +1,12 @@
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 
 from src.utils import job_utils
 from ..mappers.quiz_response_mapper import QuizResponseMapper
 from ...dependencies import get_content_job_repository, get_quiz_repository
 from ..schemas import QuizResponse, QuizSubmission, QuizEvaluationResult, QuizResult
 from ....exceptions import JobNotFoundError
+from ....services.memory_service import memory_service
 
 logger = structlog.get_logger(__name__)
 
@@ -51,6 +52,7 @@ async def get_job_quiz(
 async def submit_job_quiz(
     job_id: int,
     submission: QuizSubmission,
+    background_tasks: BackgroundTasks,
     repo = Depends(get_content_job_repository),
     quiz_repo = Depends(get_quiz_repository)
 ) -> QuizEvaluationResult:
@@ -113,6 +115,17 @@ async def submit_job_quiz(
             results=results
         )
 
+        # Trigger async memory update
+        if job.user_id:
+            background_tasks.add_task(
+                _update_memory_async,
+                user_id=job.user_id,
+                job_title=job.title or f"Job {job_id}", # Handle None title
+                evaluation=evaluation_result
+            )
+
+        return evaluation_result
+
     except JobNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except HTTPException:
@@ -120,3 +133,25 @@ async def submit_job_quiz(
     except Exception as e:
         logger.error("Failed to submit quiz", job_id=job_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to evaluate quiz submission")
+
+def _update_memory_async(user_id: str, job_title: str, evaluation: QuizEvaluationResult):
+    try:
+        score_percent = evaluation.percentage
+        total_questions = len(evaluation.results)
+        correct_count = sum(1 for r in evaluation.results if r.is_correct)
+        
+        memory_text = f"User completed quiz on '{job_title}'. Score: {score_percent}% ({correct_count}/{total_questions}). "
+        
+        failed_topics = []
+        for r in evaluation.results:
+            if not r.is_correct:
+                # Ideally we'd have concept tags here, but using question text snippet for now
+                snippet = (r.question_id + ": " + r.correct_answer)[:50]
+                failed_topics.append(snippet)
+        
+        if failed_topics:
+            memory_text += f"Failed questions involved: {'; '.join(failed_topics[:3])}..."
+            
+        memory_service.add_memory(user_id, memory_text)
+    except Exception as e:
+        logger.error("async_memory_update_failed", user_id=user_id, error=str(e))

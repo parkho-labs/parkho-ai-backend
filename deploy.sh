@@ -10,6 +10,12 @@ PROJECT_ID="parkhoai-864b2"
 SERVICE_NAME="ai-content-tutor"
 REGION="us-central1"
 
+# PROD DATABASE URL (Supabase)
+# User requested to include this directly in the script.
+# NOTE: Ensure the password is URL-encoded if it contains special chars.
+# Verified Password: ParkhoAI@&098 -> ParkhoAI%40%26098
+SUPABASE_DB_URL="postgresql://postgres:ParkhoAI%40%26098@db.kjliolcvhuzsuehnelfw.supabase.co:5432/postgres"
+
 echo "🚀 Starting deployment to GCP Cloud Run..."
 
 # Step 1: Enable required APIs
@@ -36,7 +42,7 @@ gcloud run deploy $SERVICE_NAME \
     --clear-env-vars \
     --clear-cloudsql-instances \
     --set-secrets="OPENAI_API_KEY=OPENAI_API_KEY:latest" \
-    --set-secrets="DATABASE_URL=DATABASE_URL:latest"
+    --set-env-vars="DATABASE_URL=$SUPABASE_DB_URL"
 
 echo "✅ Deployment complete!"
 echo "🌐 Your service URL:"
