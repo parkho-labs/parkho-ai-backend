@@ -6,7 +6,9 @@ import structlog
 from .base import ContentTutorAgent
 from ..services.question_generation_service import question_generation_service
 from ..repositories.quiz_repository import QuizRepository
+from ..repositories.quiz_repository import QuizRepository
 from ..core.database import SessionLocal
+from ..services.memory_service import memory_service
 
 logger = structlog.get_logger(__name__)
 
@@ -39,12 +41,22 @@ class QuestionGeneratorAgent(ContentTutorAgent):
 
             content = f"{rag_context}\n\n{transcript}" if rag_context else transcript
             difficulty_level = data.get("difficulty_level", "intermediate")
+            user_id = data.get("user_id")
+            
+            user_profile = ""
+            if user_id:
+                try:
+                    user_profile = memory_service.get_user_profile(user_id)
+                    logger.info("injected_user_profile", user_id=user_id, profile_length=len(user_profile))
+                except Exception as e:
+                    logger.warning("failed_to_inject_profile", error=str(e))
 
             agent_result = await question_generation_service.generate_questions(
                 subject=subject_type,
                 content=content,
                 question_config=question_config,
-                difficulty_level=difficulty_level
+                difficulty_level=difficulty_level,
+                user_profile=user_profile
             )
 
             all_questions = agent_result.get("questions", [])

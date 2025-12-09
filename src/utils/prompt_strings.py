@@ -1,5 +1,14 @@
 class PromptStrings:
-    PHYSICS_QUESTIONS = """Generate exactly {total_questions} physics questions at {difficulty} level.
+    PHYSICS_QUESTIONS = """SYSTEM: You are an adaptive AI tutor.
+
+PEDAGOGICAL STRATEGY (Non-negotiable):
+{user_profile}
+
+CONTENT SOURCE (Strictly based on this):
+{content}
+
+TASK:
+Generate exactly {total_questions} physics questions at {difficulty} level.
 
 Question breakdown:
 {question_breakdown}
@@ -31,11 +40,18 @@ Rules:
 - For multiple_correct: answer_config.correct uses array of indices
 - Set requires_diagram=true for problems needing visual representation
 - Include diagram_elements for force diagrams, circuits, waves, energy graphs
+"""
 
-Content:
-{content}"""
+    CHEMISTRY_QUESTIONS = """SYSTEM: You are an adaptive AI tutor.
 
-    CHEMISTRY_QUESTIONS = """Generate exactly {total_questions} chemistry questions at {difficulty} level.
+PEDAGOGICAL STRATEGY (Non-negotiable):
+{user_profile}
+
+CONTENT SOURCE (Strictly based on this):
+{content}
+
+TASK:
+Generate exactly {total_questions} chemistry questions at {difficulty} level.
 
 Question breakdown:
 {question_breakdown}
@@ -67,11 +83,18 @@ Rules:
 - For multiple_correct: answer_config.correct uses array of indices
 - Set requires_diagram=true for molecular structures, reactions
 - Include diagram_elements for molecular diagrams, reaction pathways
+"""
 
-Content:
-{content}"""
+    GENERIC_QUESTIONS = """SYSTEM: You are an adaptive AI tutor.
 
-    GENERIC_QUESTIONS = """Generate exactly {total_questions} educational questions at {difficulty} level.
+PEDAGOGICAL STRATEGY (Non-negotiable):
+{user_profile}
+
+CONTENT SOURCE (Strictly based on this):
+{content}
+
+TASK:
+Generate exactly {total_questions} educational questions at {difficulty} level.
 
 Question breakdown:
 {question_breakdown}
@@ -102,6 +125,4 @@ Rules:
 - For short_answer: answer_config.correct contains key terms
 - For multiple_correct: answer_config.correct uses array of indices
 - Set requires_diagram=false for most general questions
-
-Content:
-{content}"""
+"""

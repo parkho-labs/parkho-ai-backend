@@ -235,6 +235,9 @@ class Settings(BaseSettings):
         description="Timeout for direct Gemini strategy"
     )
 
+    # Mem0 / Postgres Configuration
+    mem0_collection_name: str = Field(default="user_memory", description="Collection name for user memory")
+
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def parse_allowed_origins(cls, value):

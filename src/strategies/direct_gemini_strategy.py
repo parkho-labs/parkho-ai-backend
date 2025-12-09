@@ -154,6 +154,8 @@ class DirectGeminiStrategy(ContentProcessingStrategy):
         """
         # Import here to avoid circular dependencies
         from ..services.llm_service import LLMService
+        import tempfile
+        import shutil
 
         # Get LLM service with Gemini configuration
         settings = self.config.get("settings")
@@ -169,17 +171,111 @@ class DirectGeminiStrategy(ContentProcessingStrategy):
         # Generate comprehensive prompt for video analysis
         prompt = self._build_gemini_prompt(job_config)
 
-        logger.info("Calling Gemini video API", url=url)
+        logger.info("Starting Gemini video processing flow", url=url)
 
-        # Call Gemini with video URL
-        response = await llm_service.generate_video_content(
-            video_url=url,
-            prompt=prompt,
-            model_name=settings.gemini_video_model_name
-        )
+        video_path = None
+        uploaded_file = None
+        
+        try:
+            # 1. Download video locally
+            logger.info("Downloading video for Gemini analysis...", url=url)
+            # Use job_id for uniqueness if available in context, otherwise random temp
+            video_path = await self._download_video(url)
+            
+            # 2. Upload to Gemini
+            logger.info("Uploading video to Gemini...", file_path=str(video_path))
+            uploaded_file = llm_service.upload_file(str(video_path), mime_type="video/mp4")
+            
+            # 3. Wait for processing
+            logger.info("Waiting for Gemini to process video...", file_uri=uploaded_file.uri)
+            await llm_service.wait_for_files_active([uploaded_file])
 
-        # Parse Gemini response into structured format
-        return self._parse_gemini_response(response, url)
+            # 4. Generate content
+            logger.info("Calling Gemini video analysis API")
+            response = await llm_service.generate_video_content(
+                video_file=uploaded_file,
+                prompt=prompt,
+                model_name=settings.gemini_video_model_name
+            )
+
+            # Parse Gemini response into structured format
+            return self._parse_gemini_response(response, url)
+
+        finally:
+            # Cleanup: Delete local file
+            if video_path and video_path.exists():
+                try:
+                    video_path.unlink()
+                    # Also try to remove parent temp dir if empty
+                    if not any(video_path.parent.iterdir()):
+                        video_path.parent.rmdir()
+                except Exception as e:
+                    logger.warning("Failed to cleanup temp video file", path=str(video_path), error=str(e))
+
+            # Cleanup: Delete from Gemini (optional but good practice if not caching)
+            # if uploaded_file:
+            #     try:
+            #         genai.delete_file(uploaded_file.name)
+            #     except:
+            #         pass
+
+    async def _download_video(self, url: str) -> Path:
+        """
+        Download YouTube video to a temporary file using yt-dlp.
+        Downloads in 360p/480p to accept speed vs quality trade-off for analysis.
+        """
+        import yt_dlp
+        from pathlib import Path
+        import tempfile
+        
+        temp_dir = Path(tempfile.mkdtemp())
+        output_path = temp_dir / "video.mp4"
+
+        def _download_sync():
+            ydl_opts = {
+                'format': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]',  # Limit resolution for speed
+                'outtmpl': str(output_path.with_suffix('')),
+                'merge_output_format': 'mp4',
+                'quiet': True,
+                'no_warnings': True,
+                # 'cookiesfrombrowser': ('chrome',), # Optional: might be needed for some videos
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _download_sync)
+
+            # Handling yt-dlp output naming quirks (sometimes adds extension even if specified)
+            # Check for the expected file, if not found look for others in temp dir
+            target_file = output_path
+            
+            # yt-dlp might not append .mp4 if it's already in the template, or might append it if it's not.
+            # safe check:
+            if not target_file.exists():
+                potential_files = list(temp_dir.glob("*.mp4"))
+                if potential_files:
+                    target_file = potential_files[0]
+                else:
+                     raise ValueError("Video download failed - file not found")
+
+            file_size = target_file.stat().st_size
+            logger.info("Video downloaded successfully", size_mb=round(file_size / (1024 * 1024), 2), path=str(target_file))
+            
+            # Rename to ensure it matches what we expect if we found a different file
+            if target_file != output_path:
+                 target_file.rename(output_path)
+                 target_file = output_path
+
+            return target_file
+
+        except Exception as e:
+            if temp_dir.exists():
+                import shutil
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            raise ValueError(f"Video download failed: {str(e)}")
 
     def _build_gemini_prompt(self, job_config: Dict[str, Any]) -> str:
         """
@@ -202,7 +298,7 @@ class DirectGeminiStrategy(ContentProcessingStrategy):
             question_requirements = ", ".join(question_types)
 
         prompt = f"""
-Analyze this YouTube video and provide a comprehensive educational analysis.
+Analyze this video and provide a comprehensive educational analysis.
 
 IMPORTANT: Return ONLY valid JSON. 
 - You MUST properly escape all double quotes within strings (e.g., "The \\"quoted\\" word").

@@ -245,10 +245,65 @@ class LLMService:
 
             return [] if '[' in response else {}
 
+    def upload_file(self, file_path: str, mime_type: Optional[str] = None) -> Any:
+        """
+        Upload a file to Google Gemini API.
+
+        Args:
+            file_path: Path to the file to upload
+            mime_type: Optional MIME type of the file
+
+        Returns:
+            Uploaded file object
+        """
+        if not self.google_client:
+            raise ValueError("Google Gemini client not available")
+
+        try:
+            logger.info("Uploading file to Gemini", file_path=file_path)
+            if mime_type:
+                file = genai.upload_file(file_path, mime_type=mime_type)
+            else:
+                file = genai.upload_file(file_path)
+            
+            logger.info("File uploaded to Gemini", file_name=file.name, uri=file.uri)
+            return file
+
+        except Exception as e:
+            raise ValueError(f"Failed to upload file to Gemini: {str(e)}")
+
+    async def wait_for_files_active(self, files: List[Any], timeout: int = 300) -> None:
+        """
+        Wait for uploaded files to be processed and active.
+
+        Args:
+            files: List of uploaded file objects
+            timeout: Maximum wait time in seconds
+        """
+        import time
+        import asyncio
+
+        logger.info("Waiting for Gemini files to be processed...")
+        
+        start_time = time.time()
+        for file in files:
+            while file.state.name == "PROCESSING":
+                if time.time() - start_time > timeout:
+                    raise ValueError(f"Timeout waiting for file processing: {file.name}")
+                
+                await asyncio.sleep(2)
+                file = genai.get_file(file.name)
+
+            if file.state.name != "ACTIVE":
+                raise ValueError(f"File processing failed: {file.name}, state: {file.state.name}")
+
+        logger.info("All Gemini files processed and active")
+
     async def generate_video_content(
         self,
-        video_url: str,
-        prompt: str,
+        video_url: str = None,
+        video_file: Any = None,
+        prompt: str = "",
         model_name: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 10000
@@ -257,17 +312,15 @@ class LLMService:
         Generate content analysis for video using Google Gemini's video understanding API.
 
         Args:
-            video_url: YouTube URL to analyze
+            video_url: YouTube URL (deprecated for direct analysis, used contextually)
+            video_file: Uploaded Gemini file object (preferred)
             prompt: Analysis prompt for the video
-            model_name: Gemini model to use (defaults to google_model_name from config)
+            model_name: Gemini model to use
             temperature: Generation temperature
             max_tokens: Maximum tokens to generate
 
         Returns:
             Generated analysis response
-
-        Raises:
-            ValueError: If Gemini is not available or video processing fails
         """
         if not self.google_client:
             raise ValueError("Google Gemini client not available. Check API key.")
@@ -277,37 +330,43 @@ class LLMService:
             model_name = self.google_model_name
 
         try:
-            logger.info("Starting Gemini video analysis", video_url=video_url, model=model_name)
+            logger.info("Starting Gemini video analysis", model=model_name)
 
-            # Configure generation parameters for video analysis
+            # Configure generation parameters
             generation_config = genai.types.GenerationConfig(
                 temperature=temperature,
                 max_output_tokens=max_tokens
             )
 
-            # Create model instance with video capabilities
-            video_model = genai.GenerativeModel(model_name)
+            # Create model instance
+            model = genai.GenerativeModel(model_name)
 
-            # For video analysis, we need to provide the video URL directly
-            # Gemini can analyze YouTube videos by URL
-            full_prompt = f"""
-Analyze the YouTube video at: {video_url}
+            content_parts = []
+            
+            # If we have a file object, use it directly (this is the reliable way)
+            if video_file:
+                logger.info("Using uploaded video file for analysis", file_uri=video_file.uri)
+                content_parts.append(video_file)
+                content_parts.append(prompt)
+            
+            # Fallback (legacy): If only URL is provided, try to use it in prompt (unreliable)
+            elif video_url:
+                logger.warning("Using legacy URL-based analysis (prone to hallucinations)", video_url=video_url)
+                full_prompt = f"Analyze the YouTube video at: {video_url}\n\n{prompt}"
+                content_parts.append(full_prompt)
+            
+            else:
+                raise ValueError("Either video_file or video_url must be provided")
 
-{prompt}
-
-Please provide a thorough analysis based on the video content.
-"""
-
-            response = video_model.generate_content(
-                full_prompt,
+            response = model.generate_content(
+                content_parts,
                 generation_config=generation_config
             )
 
             result = response.text
             logger.info(
                 "Gemini video analysis completed",
-                response_length=len(result),
-                video_url=video_url
+                response_length=len(result)
             )
             return result
 
@@ -315,10 +374,13 @@ Please provide a thorough analysis based on the video content.
             error_msg = f"Gemini video analysis failed: {str(e)}"
             logger.error(
                 "Video analysis error",
-                video_url=video_url,
                 error=error_msg,
                 exc_info=True
             )
+            # Check for recitations error (copyright)
+            if "RECITATION" in str(e):
+                 raise ValueError(f"Content blocked due to copyright/recitation check: {str(e)}")
+                 
             raise ValueError(error_msg)
 
     def supports_video_analysis(self) -> bool:
