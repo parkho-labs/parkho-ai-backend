@@ -295,7 +295,7 @@ class RAGIntegrationService:
             return response.json()
         except Exception as e:
             logger.error(f"Failed to query with filters for files {file_ids}: {e}")
-            return {"answer": "", "chunks": [], "message": str(e)}
+            raise HTTPException(status_code=502, detail="Failed to query the RAG service.")
 
 _rag_service = None
 
