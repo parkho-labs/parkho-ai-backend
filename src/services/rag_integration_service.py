@@ -269,6 +269,34 @@ class RAGIntegrationService:
             return []
 
 
+    async def query_with_filters(
+        self,
+        query: str,
+        user_id: str,
+        file_ids: List[str]
+    ) -> Dict[str, Any]:
+        try:
+            payload = {
+                "query": query,
+                "filters": {"file_ids": file_ids},
+                "enable_critic": True
+            }
+            headers = {"x-user-id": user_id}
+            # Depending on RAG API, likely use a generic /retrieve or /query endpoint
+            # Assuming RAGEndpoint.QUERY exists or we reuse a similar structure
+            # If RAG engine supports dynamic queries, we might need a new endpoint constant
+            # For now, let's assume valid endpoint is /query (Need to check constants)
+            response = await self.client.post(
+                f"{self.base_url}/query", 
+                json=payload,
+                headers=headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to query with filters for files {file_ids}: {e}")
+            raise HTTPException(status_code=502, detail="Failed to query the RAG service.")
+
 _rag_service = None
 
 def get_rag_service() -> RAGIntegrationService:

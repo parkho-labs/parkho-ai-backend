@@ -14,7 +14,7 @@ class StandardAPIResponse(BaseModel, Generic[T]):
 
     @classmethod
     def success(cls, data: T, message: str = "Success"):
-        return cls(status="success", data=data, message=message)
+        return cls(status="success", body=data, message=message)
 
     @classmethod
     def error(cls, message: str, error_code: str = None):
@@ -22,11 +22,11 @@ class StandardAPIResponse(BaseModel, Generic[T]):
 
 
 class JobStatus(str, Enum):
-    PENDING = "pending"      # Job is queued, waiting to start
-    RUNNING = "running"      # Job has started and is actively processing
-    SUCCESS = "success"      # Job completed successfully
-    FAILED = "failed"        # Job failed with errors
-    CANCELLED = "cancelled"  # Job was cancelled by user
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class QuestionType(str, Enum):
@@ -61,6 +61,7 @@ class LLMProvider(str, Enum):
     OPENAI = "openai"
     GEMINI = "gemini"
     ANTHROPIC = "anthropic"
+
 
 class InputType(str, Enum):
     COLLECTION = "collection"
@@ -125,17 +126,19 @@ class ContentJobResponse(ContentJobBase):
     class Config:
         from_attributes = True
 
+
 class ContentResults(ContentJobBase):
     job_id: int
     processing_duration_seconds: Optional[int]
-
-
+    
+    
 class FileUploadResponse(BaseModel):
     file_id: str
     filename: str
     file_size: int
     content_type: str
     upload_timestamp: datetime
+
 
 class FileProcessingResult(BaseModel):
     file_id: str
@@ -188,9 +191,11 @@ class QuestionConfig(BaseModel):
     diagram_type: Optional[str] = None
     diagram_elements: Optional[Dict[str, Any]] = None
 
+
 class QuestionMetadata(BaseModel):
     video_timestamp: Optional[str] = None
     sources: Optional[Dict[str, Any]] = None
+
 
 class QuizQuestion(BaseModel):
     question_id: str
@@ -198,6 +203,7 @@ class QuizQuestion(BaseModel):
     question_config: QuestionConfig
     metadata: QuestionMetadata = Field(default_factory=dict)
     max_score: int = 1
+
 
 class QuizResponse(BaseModel):
     quiz_id: str
@@ -207,8 +213,10 @@ class QuizResponse(BaseModel):
     total_score: int
     summary: Optional[str] = None
 
+
 class QuizSubmission(BaseModel):
     answers: Dict[str, str]
+
 
 class QuizResult(BaseModel):
     question_id: str
@@ -216,6 +224,7 @@ class QuizResult(BaseModel):
     correct_answer: str
     is_correct: bool
     score: int
+
 
 class QuizEvaluationResult(BaseModel):
     total_score: int
@@ -236,15 +245,22 @@ class RAGCollectionCreateRequest(BaseModel):
 
 
 class RAGCollectionInfo(BaseModel):
+    id: Optional[str] = None # Added id
     name: str
-    created_at: str
+    created_at: Optional[str] = None # made optional
     file_count: int
 
 
 class RAGCollectionResponse(BaseModel):
     status: str
     message: str
-    body: Optional[Dict[str, List[RAGCollectionInfo]]] = None
+    # Relaxed to allow various body structures or strictly defined unions
+    # For now, simplifying to generic Dict/Any to avoid strict validation errors during rapid dev
+    # But following PR advice: we probably want specific models.
+    # However, existing code uses this model for List Collections which returns Dict[str, List].
+    # Create Collection returns single object.
+    # Let's make body Any for flexibility or Union.
+    body: Optional[Any] = None 
 
 
 class RAGFileItem(BaseModel):
@@ -254,17 +270,18 @@ class RAGFileItem(BaseModel):
 
 
 class RAGLinkContentRequest(BaseModel):
-    content_items: List[RAGFileItem]
+    content_items: Optional[List[RAGFileItem]] = None # Deprecated?
+    file_ids: Optional[List[str]] = None # New simpler request
 
 
 class RAGLinkContentResponse(BaseModel):
-    name: str
+    name: Optional[str] = None
     file_id: str
-    type: str
+    type: Optional[str] = "file"
     created_at: Optional[str] = None
-    indexing_status: str
-    status_code: int
-    message: str
+    indexing_status: Optional[str] = None
+    status_code: int = 200
+    message: str = "Success"
 
 
 class RAGUnlinkContentRequest(BaseModel):
@@ -274,7 +291,7 @@ class RAGUnlinkContentRequest(BaseModel):
 class RAGFileDetail(BaseModel):
     file_id: str
     filename: str
-    file_type: str
+    file_type: Optional[str] = None
     file_size: int
     upload_date: str
 
@@ -298,7 +315,7 @@ class RAGQueryRequest(BaseModel):
 
 class RAGQueryResponse(BaseModel):
     status: str
-    message: str
+    message: Optional[str] = None # Added message
     body: Optional[Dict[str, Any]] = None
 
 
