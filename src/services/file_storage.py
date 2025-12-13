@@ -63,6 +63,16 @@ class FileStorageService:
             with open(file_path, "wb") as stored_file:
                 shutil.copyfileobj(file.file, stored_file)
 
+            # Persist metadata to DB
+            self.file_repo.create_file(
+                file_id=file_id,
+                filename=file.filename,
+                file_path=str(file_path),
+                file_size=file_path.stat().st_size,
+                content_type=file.content_type,
+                ttl_hours=ttl_hours
+            )
+
             return file_id
 
         except Exception as e:
