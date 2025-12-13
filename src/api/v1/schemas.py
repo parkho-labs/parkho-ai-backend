@@ -65,6 +65,8 @@ class LLMProvider(str, Enum):
 class InputType(str, Enum):
     COLLECTION = "collection"
     FILES = "files"
+    YOUTUBE = "youtube"
+    WEB_URL = "web_url"
 
 
 class ContentSubject(str, Enum):
