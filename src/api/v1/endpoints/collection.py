@@ -1,23 +1,25 @@
 import structlog
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Body
-from sqlalchemy.orm import Session
 
-from src.api.dependencies import get_db, get_current_user_conditional
-from src.models.user import User
+from src.api.dependencies import get_current_user_conditional, get_collection_service
 from src.services.collection_service import CollectionService
+from src.models.user import User
 from src.api.v1.schemas import (
-    RAGCollectionResponse, RAGCollectionCreateRequest, RAGLinkContentResponse, RAGQueryResponse,
-    RAGCollectionFilesResponse, RAGFileDetail
+    RAGCollectionCreateRequest,
+    RAGCollectionResponse,
+    RAGCollectionInfo,
+    RAGQueryRequest,
+    RAGQueryResponse,
+    RAGCollectionFilesResponse,
+    RAGFileDetail,
+    RAGLinkContentRequest # We might just use Body directly but let's see
 )
 from src.api.v1.constants import RAGStatus
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
-
-def get_collection_service(db: Session = Depends(get_db)):
-    return CollectionService(db)
 
 @router.post("", response_model=RAGCollectionResponse)
 async def create_collection(
@@ -27,6 +29,9 @@ async def create_collection(
 ):
     try:
         collection = await service.create_collection(current_user.user_id, request.name)
+        
+        # Use simple dict for body as allowed by flexible schema now
+        # Or construct proper RAGCollectionInfo if it was a list
         return RAGCollectionResponse(
             status=RAGStatus.SUCCESS,
             message="Collection created successfully",
@@ -43,14 +48,20 @@ async def list_collections(
 ):
     try:
         collections = await service.list_collections(current_user.user_id)
-        # Transform to schema
-        cols_data = [
-            {"id": c.id, "name": c.name, "file_count": len(c.files), "created_at": str(c.created_at)} 
-            for c in collections
+        
+        collections_data = [
+            RAGCollectionInfo(
+                id=c.id,
+                name=c.name,
+                created_at=c.created_at.isoformat() if c.created_at else "",
+                file_count=len(c.files)
+            ) for c in collections
         ]
+        
         return RAGCollectionResponse(
             status=RAGStatus.SUCCESS,
-            body={"collections": cols_data}
+            message="Collections listed successfully",
+            body={"collections": collections_data}
         )
     except Exception as e:
         logger.error("Failed to list collections", error=str(e))
@@ -62,28 +73,60 @@ async def delete_collection(
     current_user: User = Depends(get_current_user_conditional),
     service: CollectionService = Depends(get_collection_service)
 ):
-    await service.delete_collection(current_user.user_id, collection_id)
-    return {"status": "SUCCESS", "message": "Collection deleted"}
+    try:
+        success = await service.delete_collection(current_user.user_id, collection_id)
+        if success:
+            return {"status": "SUCCESS", "message": "Collection deleted"}
+        else:
+             raise HTTPException(status_code=404, detail="Collection not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to delete collection", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to delete collection.")
 
-@router.post("/{collection_id}/link")
+@router.post("/{collection_id}/link", response_model=RAGCollectionResponse)
 async def link_files(
     collection_id: str,
-    file_ids: List[str] = Body(..., embed=True),
+    # Accept standard Body request, mapping file_ids
+    file_ids: List[str] = Body(..., embed=True), 
     current_user: User = Depends(get_current_user_conditional),
     service: CollectionService = Depends(get_collection_service)
 ):
-    linked = await service.link_files(current_user.user_id, collection_id, file_ids)
-    return {"status": "SUCCESS", "linked_files": linked}
+    try:
+        linked = await service.link_files(current_user.user_id, collection_id, file_ids)
+        
+        return RAGCollectionResponse(
+            status=RAGStatus.SUCCESS, 
+            message=f"{len(linked)} files linked successfully.",
+            body={"linked_files": linked}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to link files", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/{collection_id}/unlink")
+@router.post("/{collection_id}/unlink", response_model=RAGCollectionResponse)
 async def unlink_files(
     collection_id: str,
     file_ids: List[str] = Body(..., embed=True),
     current_user: User = Depends(get_current_user_conditional),
     service: CollectionService = Depends(get_collection_service)
 ):
-    unlinked = await service.unlink_files(current_user.user_id, collection_id, file_ids)
-    return {"status": "SUCCESS", "unlinked_files": unlinked}
+    try:
+        unlinked = await service.unlink_files(current_user.user_id, collection_id, file_ids)
+        
+        return RAGCollectionResponse(
+            status=RAGStatus.SUCCESS, 
+            message=f"{len(unlinked)} files unlinked successfully.",
+            body={"unlinked_files": unlinked}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to unlink files", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{collection_id}/files", response_model=RAGCollectionFilesResponse)
 async def get_collection_files(
@@ -91,32 +134,40 @@ async def get_collection_files(
     current_user: User = Depends(get_current_user_conditional),
     service: CollectionService = Depends(get_collection_service)
 ):
-    collection = await service.get_collection(collection_id)
-    if not collection or collection.user_id != current_user.user_id:
-        raise HTTPException(status_code=404, detail="Collection not found")
-    
-    files = [
-        RAGFileDetail(
-            file_id=f.id,
-            filename=f.filename,
-            file_size=f.file_size,
-            upload_date=str(f.upload_timestamp)
-        ) for f in collection.files
-    ]
-    return RAGCollectionFilesResponse(
-        status=RAGStatus.SUCCESS,
-        body={"files": files}
-    )
+    try:
+        files = await service.get_collection_files(current_user.user_id, collection_id)
+        
+        # files is list of dicts from service
+        mapped_files = [RAGFileDetail(**f) for f in files]
+        
+        return RAGCollectionFilesResponse(
+            status=RAGStatus.SUCCESS,
+            message="Files retrieved successfully",
+            body={"files": mapped_files}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get collection files", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/{collection_id}/query", response_model=RAGQueryResponse)
 async def query_collection(
     collection_id: str,
-    query: str = Body(..., embed=True),
+    request: RAGQueryRequest,
     current_user: User = Depends(get_current_user_conditional),
     service: CollectionService = Depends(get_collection_service)
 ):
-    result = await service.query_collection(current_user.user_id, collection_id, query)
-    return RAGQueryResponse(
-        status=RAGStatus.SUCCESS,
-        body=result
-    )
+    try:
+        result = await service.query_collection(current_user.user_id, collection_id, request.query)
+        
+        return RAGQueryResponse(
+            status=RAGStatus.SUCCESS,
+            message="Query processed successfully",
+            body=result
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to query collection", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))

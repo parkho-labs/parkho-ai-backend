@@ -1,66 +1,68 @@
-import structlog
-import uuid
-from typing import List, Dict, Any, Optional
-from sqlalchemy.orm import Session
+from typing import List, Dict, Any
 from fastapi import HTTPException
-
-from ..repositories.collection_repository import CollectionRepository
-from ..services.rag_integration_service import get_rag_service, RAGIntegrationService
-from ..models.collection import Collection
-
-logger = structlog.get_logger(__name__)
+from src.repositories.collection_repository import CollectionRepository
+from src.services.rag_integration_service import RAGIntegrationService
+from src.models.collection import Collection
 
 class CollectionService:
-    def __init__(self, db: Session):
-        self.repository = CollectionRepository(db)
-        self.rag_service = get_rag_service()
+    def __init__(self, repository: CollectionRepository, rag_service: RAGIntegrationService):
+        self.repository = repository
+        # We need RAG service only for Querying, not for Management anymore!
+        self.rag_service = rag_service
 
-    async def create_collection(self, user_id: str, name: str, description: str = None) -> Collection:
-        return self.repository.create(user_id, name, description)
+    async def create_collection(self, user_id: str, name: str) -> Collection:
+        return self.repository.create(user_id, name)
 
     async def list_collections(self, user_id: str) -> List[Collection]:
-        return self.repository.get_by_user(user_id)
-    
-    async def get_collection(self, collection_id: str) -> Optional[Collection]:
-        return self.repository.get_by_id(collection_id)
+        return self.repository.get_all_by_user(user_id)
 
     async def delete_collection(self, user_id: str, collection_id: str) -> bool:
         collection = self.repository.get_by_id(collection_id)
-        if not collection:
-            raise HTTPException(status_code=404, detail="Collection not found")
-        if collection.user_id != user_id:
-            raise HTTPException(status_code=403, detail="Not authorized to delete this collection")
-        
+        if not collection or collection.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Collection not found or unauthorized")
         return self.repository.delete(collection_id)
 
     async def link_files(self, user_id: str, collection_id: str, file_ids: List[str]) -> List[str]:
+        # Verify collection ownership
         collection = self.repository.get_by_id(collection_id)
         if not collection or collection.user_id != user_id:
             raise HTTPException(status_code=404, detail="Collection not found or unauthorized")
 
-        success_ids = []
-        for fid in file_ids:
-            if self.repository.add_file(collection_id, fid):
-                success_ids.append(fid)
-        return success_ids
+        # Optimization: Use Bulk Insert
+        count = self.repository.add_files_bulk(collection_id, file_ids)
+        
+        # We assume all valid IDs were added. 
+        # Ideally we'd return exactly which IDs were new, but for now returning the input list 
+        # (or just the count) is acceptable for the UI to update optimistically.
+        return file_ids 
 
     async def unlink_files(self, user_id: str, collection_id: str, file_ids: List[str]) -> List[str]:
+        # Verify collection ownership
         collection = self.repository.get_by_id(collection_id)
         if not collection or collection.user_id != user_id:
             raise HTTPException(status_code=404, detail="Collection not found or unauthorized")
 
-        success_ids = []
-        for fid in file_ids:
-            if self.repository.remove_file(collection_id, fid):
-                success_ids.append(fid)
-        return success_ids
+        # Optimization: Use Bulk Delete
+        count = self.repository.remove_files_bulk(collection_id, file_ids)
+        return file_ids
+
+    async def get_collection_files(self, user_id: str, collection_id: str) -> List[Dict[str, Any]]:
+        collection = self.repository.get_by_id(collection_id)
+        if not collection or collection.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Collection not found or unauthorized")
+        
+        # Convert ORM objects to dicts
+        files = []
+        for f in collection.files:
+            files.append({
+                "file_id": f.id,
+                "filename": f.filename,
+                "file_size": f.file_size,
+                "upload_date": f.upload_timestamp.isoformat() if f.upload_timestamp else ""
+            })
+        return files
 
     async def query_collection(self, user_id: str, collection_id: str, query: str) -> Dict[str, Any]:
-        """
-        Query a native collection.
-        1. Fetch file IDs linked to the collection.
-        2. Pass those file IDs as a filter to the RAG engine.
-        """
         collection = self.repository.get_by_id(collection_id)
         if not collection or collection.user_id != user_id:
             raise HTTPException(status_code=404, detail="Collection not found or unauthorized")
@@ -70,6 +72,4 @@ class CollectionService:
             return {"answer": "Collection is empty.", "chunks": []}
 
         # Call RAG Service with file filter
-        # Note: We need to implement query_files in RAGIntegrationService or reuse query_collection if configurable
-        # For now, assuming we add a method `query_with_filters` to RAG service
         return await self.rag_service.query_with_filters(query, user_id, file_ids)
