@@ -54,7 +54,7 @@ async def list_collections(
         )
     except Exception as e:
         logger.error("Failed to list collections", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while listing collections.")
 
 @router.delete("/{collection_id}")
 async def delete_collection(
