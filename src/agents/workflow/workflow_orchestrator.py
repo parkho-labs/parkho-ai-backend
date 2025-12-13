@@ -4,14 +4,17 @@ import structlog
 from sqlalchemy.orm import Session
 
 from .job_status_manager import JobStatusManager
-from .content_parsing_coordinator import ContentParsingCoordinator
+
 from ..question_generator import QuestionGeneratorAgent
-from ...strategies.strategy_factory import ContentProcessingStrategyFactory
-from ...strategies.base_strategy import ProcessingStatus
+from ...services.llm_service import LLMService
+# from ...strategies.strategy_factory import ContentProcessingStrategyFactory # REMOVED
+# from ...strategies.base_strategy import ProcessingStatus # REMOVED
 from ...utils.database_utils import DatabaseService
 from ...utils.validation_utils import validate_job_exists
 from ...exceptions import WorkflowError
 from ...services.rag_integration_service import get_rag_service
+from ...config import get_settings
+import time
 
 logger = structlog.get_logger(__name__)
 
@@ -20,7 +23,8 @@ class WorkflowOrchestrator:
     def __init__(self, db_session: Session):
         self.db_service = DatabaseService(db_session)
         self.job_manager = JobStatusManager(self.db_service)
-        self.parsing_coordinator = ContentParsingCoordinator(db_session)
+        self.llm_service = None
+
         try:
             self.rag_service = get_rag_service()
             self.rag_enabled = True
@@ -29,20 +33,110 @@ class WorkflowOrchestrator:
             self.rag_service = None
             self.rag_enabled = False
         self.question_generator = QuestionGeneratorAgent()
-        self.strategy_factory = ContentProcessingStrategyFactory()
+        
+        # Initialize LLM Service
+        try:
+            settings = get_settings()
+            self.llm_service = LLMService(
+                openai_api_key=settings.openai_api_key,
+                anthropic_api_key=settings.anthropic_api_key,
+                google_api_key=settings.google_api_key
+            )
+        except Exception as e:
+            logger.error("llm_service_initialization_failed", error=str(e))
+            # workflow will likely fail later if this didn't work
 
     async def process_content(self, job_id: int) -> None:
         logger.info("workflow_started", job_id=job_id)
+        start_time = time.time()
 
         try:
             job = await self._validate_and_get_job(job_id)
             await self.job_manager.mark_job_started(job_id)
 
-            await self._execute_strategy_with_fallback(job_id, job)
+            # --- 1. Validate Input & RAG ---
+            collection_name = job.collection_name
+            if not collection_name:
+                input_config = job.input_config_dict or {}
+                for source in input_config.get("input_config", []):
+                    if source.get("content_type") == "collection":
+                        collection_name = source.get("id")
+                        break
+            
+            if not collection_name:
+                raise ValueError("No collection name provided. RAG-based processing requires a collection.")
+
+            if not self.rag_service:
+                raise WorkflowError("RAG Service is not available but is required for processing.")
+
+            # --- 2. Retrieve Context ---
+            await self.job_manager.update_job_progress(job_id, 20.0, "Retrieving content from RAG...")
+            try:
+                # Use collection name as topic query
+                content_text = await self.rag_service.get_collection_context(collection_name, collection_name, "default_user")
+            except Exception as e:
+                logger.error("rag_retrieval_failed", job_id=job_id, error=str(e))
+                raise WorkflowError(f"Failed to retrieve context from RAG: {str(e)}")
+
+            if not content_text:
+                raise ValueError(f"No content found in collection '{collection_name}' (or RAG service returned empty).")
+
+            title = job.title or collection_name
+
+            # --- 3. Generate Summary ---
+            summary = ""
+            if job.input_config_dict.get("generate_summary", True):
+                await self.job_manager.update_job_progress(job_id, 40.0, "Generating summary...")
+                try:
+                    summary = await self._generate_summary(content_text)
+                except Exception as e:
+                    logger.warning("summary_generation_failed", job_id=job_id, error=str(e))
+                    summary = "Summary generation failed."
+
+            # --- 4. Generate Questions ---
+            await self.job_manager.update_job_progress(job_id, 70.0, "Generating quiz questions...")
+            rag_context = content_text
+            
+            agent_data = {
+                "transcript": content_text,
+                "title": title,
+                "rag_context": rag_context,
+                "subject_type": "general", 
+                "question_types": job.input_config_dict.get("question_types", {"multiple_choice": 5}),
+                "difficulty_level": job.input_config_dict.get("difficulty_level", "intermediate")
+            }
+            
+            try:
+                agent_result = await self.question_generator.run(job_id, agent_data)
+                questions = agent_result.get("questions", [])
+            except Exception as e:
+                logger.error("question_generation_failed", job_id=job_id, error=str(e))
+                raise WorkflowError(f"Question generation failed: {str(e)}")
+
+            # --- 5. Finalize ---
+            await self.job_manager.update_job_progress(job_id, 90.0, "Finalizing job")
+            
+            result_data = {
+                "summary": summary,
+                "content": content_text,
+                "questions": questions,
+                "title": title,
+                "metadata": {
+                    "collection_name": collection_name,
+                    "content_length": len(content_text),
+                    "processing_method": "rag_only",
+                    "processing_time": time.time() - start_time
+                }
+            }
+            
+            await self._finalize_job(job_id, job, result_data)
+            await self.job_manager.mark_job_completed(job_id)
+            logger.info("workflow_completed_successfully", job_id=job_id)
 
         except Exception as e:
-            logger.error("workflow_failed", job_id=job_id, error=str(e))
+            logger.error("workflow_failed", job_id=job_id, error=str(e), exc_info=True)
             await self.job_manager.mark_job_failed(job_id, str(e))
+            # Re-raise if needed or suppress
             raise WorkflowError(f"Content processing failed: {str(e)}")
 
     async def _validate_and_get_job(self, job_id: int):
@@ -50,84 +144,28 @@ class WorkflowOrchestrator:
         validate_job_exists(job, job_id)
         return job
 
-    async def _execute_strategy_with_fallback(self, job_id: int, job):
-        input_config=job.input_config_dict or {}
-        selection_result = self.strategy_factory.select_strategy(
-            input_config=input_config.get("input_config", []),
-            job_config=job.output_config_dict or {}
-        )
-        
-        strategy = selection_result.strategy
-        strategy_name = selection_result.strategy_name
-
-        try:
-            result = await strategy.process_content(job_id)
-
-            if result.status == ProcessingStatus.SUCCESS:
-                await self._handle_successful_completion(job_id, job, result)
-            else:
-                await self._handle_processing_failure(job_id, result)
-
-        except Exception as e:
-            logger.warning("primary_strategy_failed", job_id=job_id, error=str(e), strategy=strategy_name)
-            await self._try_fallback_strategy(job_id, job, failed_strategy_name=strategy_name)
-
-    async def _handle_successful_completion(self, job_id: int, job, result):
-        await self.job_manager.update_job_progress(job_id, 90.0, "Finalizing job")
-
-        # Create data dict for finalize_job (which expects a dict)
-        result_data = {
-            "summary": result.summary,
-            "content": result.content_text,
-            "questions": result.questions,
-            "title": result.metadata.get("title") if result.metadata else None,
-            "metadata": result.metadata
-        }
-        
-        await self._finalize_job(job_id, job, result_data)
-
-        await self.job_manager.mark_job_completed(job_id)
-
-        logger.info("workflow_completed_successfully", job_id=job_id)
-
-    async def _handle_processing_failure(self, job_id: int, result):
-        error_message = result.error or "Processing failed with unknown error"
-        await self.job_manager.mark_job_failed(job_id, error_message)
-        raise WorkflowError(error_message)
-
-    async def _try_fallback_strategy(self, job_id: int, job, failed_strategy_name: str):
-        try:
-            await self.job_manager.update_job_progress(job_id, 10.0, "Trying fallback processing method")
-
-            input_config=job.input_config_dict or {}
-            fallback_strategy = self.strategy_factory.get_fallback_strategy(
-                failed_strategy=failed_strategy_name,
-                input_config=input_config.get("input_config", []),
-                config=job.output_config_dict or {}
-            )
+    async def _generate_summary(self, content: str) -> str:
+        if not self.llm_service:
+            return "Summary unavailable (LLM service not initialized)."
             
-            if not fallback_strategy:
-                raise WorkflowError("No fallback strategy available")
-
-            result = await fallback_strategy.process_content(job_id)
-
-            if result.status == ProcessingStatus.SUCCESS:
-                await self._handle_successful_completion(job_id, job, result)
-            else:
-                await self._handle_processing_failure(job_id, result)
-
-        except Exception as fallback_error:
-            logger.error("fallback_strategy_failed", job_id=job_id, error=str(fallback_error))
-            await self.job_manager.mark_job_failed(job_id, f"Both primary and fallback strategies failed: {str(fallback_error)}")
-            raise WorkflowError(f"All processing strategies failed: {str(fallback_error)}")
+        max_chars = 100000
+        truncated_content = content[:max_chars]
+        
+        system_prompt = "You are an expert educational summarizer. Create a concise, structured summary of the provided content."
+        user_prompt = f"Please summarize the following content, highlighting key concepts and main points:\\n\\n{truncated_content}"
+        
+        return await self.llm_service.generate_with_fallback(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.3,
+            max_tokens=1000
+        )
 
     async def _finalize_job(self, job_id: int, job, result_data: Dict[str, Any]):
         try:
-            if self.rag_enabled and hasattr(job, 'should_add_to_collection') and job.should_add_to_collection:
-                content = result_data.get("content", "")
-                title = result_data.get("title", "")
-                summary = result_data.get("summary", "")
-                await self._add_content_to_collection(job, content, title, summary)
+            # We skip 'add_content_to_collection' because in this RAG-only flow, 
+            # the content typically CAME from the collection. 
+            # If we wanted to add generated summary back, we could, but let's keep it simple for now.
 
             job.completed_at = datetime.utcnow()
             
@@ -141,7 +179,6 @@ class WorkflowOrchestrator:
                 await self._save_questions(job_id, result_data["questions"])
 
             self.job_manager.update_job_in_db(job)
-
             logger.info("job_finalized", job_id=job_id)
 
         except Exception as e:
@@ -162,34 +199,3 @@ class WorkflowOrchestrator:
 
         except Exception as e:
             logger.warning("question_saving_failed", job_id=job_id, error=str(e))
-
-    async def _add_content_to_collection(self, job, content: str, title: str, summary: str = ""):
-        if not self.rag_service or not getattr(job, "collection_name", None):
-            return
-
-        try:
-            # Format content with metadata for better context
-            full_content = f"Title: {title}\n"
-            if summary:
-                full_content += f"\nSummary: {summary}\n"
-            full_content += f"\nContent:\n{content or ''}"
-
-            filename = f"job_{job.id}_{(title or 'content')[:50].replace(' ', '_')}.txt"
-            
-            success = await self.rag_service.upload_and_link_content(
-                collection_name=job.collection_name,
-                content_data={
-                    "content": full_content,
-                    "filename": filename,
-                    "content_type": "text"
-                }
-            )
-            if success:
-                logger.info(
-                    "content_added_to_collection",
-                    job_id=job.id,
-                    collection=job.collection_name,
-                    filename=filename
-                )
-        except Exception as e:
-            logger.warning("rag_linking_failed", job_id=job.id, error=str(e))
