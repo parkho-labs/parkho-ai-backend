@@ -63,8 +63,6 @@ class LLMProvider(str, Enum):
     ANTHROPIC = "anthropic"
 
 class InputType(str, Enum):
-    YOUTUBE = "youtube"
-    WEB_URL = "web_url"
     COLLECTION = "collection"
     FILES = "files"
 

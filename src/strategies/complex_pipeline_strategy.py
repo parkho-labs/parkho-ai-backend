@@ -7,7 +7,6 @@ from .base_strategy import ContentProcessingStrategy, ProcessingResult, Processi
 from ..core.database import get_db
 from ..repositories.content_job_repository import ContentJobRepository
 from ..repositories.quiz_repository import QuizRepository
-from ..agents.workflow.content_parsing_coordinator import ContentParsingCoordinator
 from ..services.llm_service import LLMService, LLMProvider
 from ..agents.question_generator import QuestionGeneratorAgent
 from ..services.rag_integration_service import get_rag_service
@@ -44,44 +43,44 @@ class ComplexPipelineStrategy(ContentProcessingStrategy):
                 )
 
             settings = get_settings()
-            coordinator = ContentParsingCoordinator(db_session)
             llm_service = LLMService(
                 openai_api_key=settings.openai_api_key,
                 anthropic_api_key=settings.anthropic_api_key,
                 google_api_key=settings.google_api_key
             )
             question_agent = QuestionGeneratorAgent()
-            
-            await self._update_progress(repo, job_id, 10, "Parsing content sources...")
-            
+
             input_config_dict = job.input_config_dict or {}
             input_sources = input_config_dict.get("input_config", [])
-            
-            parsed_results = await coordinator.parse_all_content_sources(
-                input_sources=input_sources, 
-                user_id=job.user_id
-            )
-            
-            if not parsed_results:
-                raise ValueError("No content was successfully parsed from the provided sources")
 
-            combined_data = coordinator.combine_parsed_results(parsed_results)
-            content_text = combined_data.get("content", "")
-            title = combined_data.get("title", job.title or "Processed Content")
-            
+            if not input_sources:
+                raise ValueError("No input sources provided")
+
+            collection_name = job.collection_name
+            if not collection_name:
+                for source in input_sources:
+                    if source.get("content_type") == "collection":
+                        collection_name = source.get("id")
+                        break
+
+            if not collection_name:
+                raise ValueError("No collection name provided. Only collection-based processing is supported.")
+
+            await self._update_progress(repo, job_id, 20, "Retrieving content from RAG...")
+
+            content_text = await self._retrieve_rag_context(collection_name, "")
+            title = job.title or collection_name
+
             if not content_text:
-                raise ValueError("Parsed content is empty")
-                
+                raise ValueError("No content retrieved from RAG collection")
+
             await self._update_progress(repo, job_id, 40, "Generating content summary...")
-            
+
             summary = ""
             if job.input_config_dict.get("generate_summary", True):
                 summary = await self._generate_summary(llm_service, content_text, job.input_config_dict)
 
-            rag_context = ""
-            if job.collection_name:
-                await self._update_progress(repo, job_id, 60, "Retrieving RAG context...")
-                rag_context = await self._retrieve_rag_context(job.collection_name, content_text)
+            rag_context = content_text
 
             await self._update_progress(repo, job_id, 70, "Generating quiz questions...")
             
@@ -98,12 +97,12 @@ class ComplexPipelineStrategy(ContentProcessingStrategy):
             questions = agent_result.get("questions", [])
 
             await self._update_progress(repo, job_id, 90, "Finalizing results...")
-            
+
             metadata = {
+                "collection_name": collection_name,
                 "source_count": len(input_sources),
-                "total_length": len(content_text),
-                "rag_enabled": bool(job.collection_name),
-                "processing_method": "complex_pipeline"
+                "content_length": len(content_text),
+                "processing_method": "rag_only"
             }
 
             processing_time = time.time() - start_time
@@ -166,7 +165,11 @@ class ComplexPipelineStrategy(ContentProcessingStrategy):
     async def _retrieve_rag_context(self, collection_name: str, content: str) -> str:
         try:
             rag_service = get_rag_service()
-            return "" 
+            # Use a generic topic or query for broad context if specific query is not available
+            # Ideally we might want more specific retrieval, but for "generate from collection" 
+            # we often want a broad overview or specific high-ranking chunks.
+            # get_collection_context fetches top 50 chunks.
+            return await rag_service.get_collection_context(collection_name, "summary", "default_user")
         except Exception as e:
             logger.warning("Failed to retrieve RAG context", error=str(e))
             return ""

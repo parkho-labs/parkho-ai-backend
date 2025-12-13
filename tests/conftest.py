@@ -89,7 +89,76 @@ def sample_video_path(tmp_path):
 
 
 @pytest.fixture
-def sample_audio_path(tmp_path):
+def mock_audio_path(tmp_path):
     audio_file = tmp_path / "test_audio.mp3"
     audio_file.write_bytes(b"fake audio content")
     return audio_file
+
+
+@pytest.fixture
+def test_db():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from src.core.database import Base
+    
+    # Use in-memory SQLite for tests
+    SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    )
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    
+    Base.metadata.create_all(bind=engine)
+    
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture
+async def async_client(test_db, mock_current_user):
+    from httpx import AsyncClient, ASGITransport
+    from src.main import app
+    from src.core.database import get_db
+    from src.api.dependencies import get_current_user_conditional
+    
+    def override_get_db():
+        try:
+            yield test_db
+        finally:
+            pass
+            
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user_conditional] = lambda: mock_current_user
+    
+    # Use ASGITransport for direct app interaction
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+        
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def mock_current_user(test_db):
+    from src.models.user import User
+    user = User(
+        user_id="test_user_id",
+        email="test@example.com",
+        full_name="Test User",
+        firebase_uid="test_firebase_uid"
+    )
+    test_db.add(user)
+    test_db.commit()
+    test_db.refresh(user)
+    return user
+
+
+@pytest.fixture
+def mock_rag_service():
+    service = MagicMock()
+    service.upload_and_link_content = AsyncMock(return_value=True)
+    return service

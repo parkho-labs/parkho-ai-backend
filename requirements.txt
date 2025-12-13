@@ -10,20 +10,18 @@ alembic>=1.12.0
 # AI/ML Libraries
 openai>=1.0.0
 anthropic>=0.7.0
-google-adk>=0.1.0
 google-generativeai>=0.3.0
 
-# Video Processing
-yt-dlp>=2023.10.0
+# REMOVED: Parsing dependencies (moved to RAG Engine)
+# yt-dlp>=2023.10.0
+# pymupdf4llm>=0.0.9
+# python-docx>=0.8.11
+# google-adk>=0.1.0
 
 # Data Processing
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 python-multipart>=0.0.6
-
-# Document Parsing
-pymupdf4llm>=0.0.9
-python-docx>=0.8.11
 
 # Utilities
 python-dotenv>=1.0.0

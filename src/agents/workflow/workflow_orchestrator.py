@@ -4,7 +4,7 @@ import structlog
 from sqlalchemy.orm import Session
 
 from .job_status_manager import JobStatusManager
-from .content_parsing_coordinator import ContentParsingCoordinator
+
 from ..question_generator import QuestionGeneratorAgent
 from ...strategies.strategy_factory import ContentProcessingStrategyFactory
 from ...strategies.base_strategy import ProcessingStatus
@@ -20,7 +20,7 @@ class WorkflowOrchestrator:
     def __init__(self, db_session: Session):
         self.db_service = DatabaseService(db_session)
         self.job_manager = JobStatusManager(self.db_service)
-        self.parsing_coordinator = ContentParsingCoordinator(db_session)
+
         try:
             self.rag_service = get_rag_service()
             self.rag_enabled = True
