@@ -45,7 +45,7 @@ class CollectionRepository:
             self.db.execute(stmt)
             self.db.commit()
             return True
-        except:
+        except IntegrityError:
             self.db.rollback()
             return False  # Likely already exists
 
