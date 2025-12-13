@@ -2,6 +2,7 @@ import logging
 from typing import List, Dict, Any, Optional
 import httpx
 from src.config import get_settings
+from src.api.v1.constants import RAGEndpoint, RAGResponseKey, RAGStatus
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +36,11 @@ class RAGIntegrationService:
                 "email": email or f"{user_id}@example.com",
                 "name": name or f"User {user_id}"
             }
-            response = await self.client.post(f"{self.base_url}/users/register", json=payload)
+            response = await self.client.post(f"{self.base_url}{RAGEndpoint.USER_REGISTER}", json=payload)
             response.raise_for_status()
             data = response.json()
 
-            if data.get('status') == 'SUCCESS':
+            if data.get(RAGResponseKey.STATUS) == RAGStatus.SUCCESS:
                 logger.info(f"Successfully registered user {user_id} with RAG engine")
                 return True
             else:
@@ -54,40 +55,50 @@ class RAGIntegrationService:
             raise Exception(f"RAG registration failed: {str(e)}")
 
 
-    async def upload_file(self, file_content: bytes, filename: str) -> Optional[str]:
+    async def upload_file(self, file_content: bytes, filename: str, user_id: str) -> Optional[Dict[str, Any]]:
         try:
-            files = {"file": (filename, file_content, "application/octet-stream")}
-            response = await self.client.post(f"{self.base_url}/files", files=files)
+            files = {"files": (filename, file_content, "application/octet-stream")}
+            headers = {"x-user-id": user_id}
+            response = await self.client.post(f"{self.base_url}{RAGEndpoint.FILES}", files=files, headers=headers)
             response.raise_for_status()
             data = response.json()
 
-            if data.get('status') == 'SUCCESS':
-                return data.get('body', {}).get('file_id')
+            if data.get(RAGResponseKey.STATUS) == RAGStatus.SUCCESS:
+                return {
+                    RAGResponseKey.FILE_ID: data.get(RAGResponseKey.FILE_ID),
+                    RAGResponseKey.FILENAME: data.get(RAGResponseKey.FILENAME),
+                    RAGResponseKey.STATUS: data.get(RAGResponseKey.STATUS),
+                    RAGResponseKey.MESSAGE: data.get(RAGResponseKey.MESSAGE)
+                }
             return None
         except Exception as e:
             logger.error(f"Failed to upload file {filename}: {e}")
             return None
 
-    async def list_files(self) -> List[Dict[str, Any]]:
+    async def list_files(self, user_id: str) -> Dict[str, Any]:
         try:
-            response = await self.client.get(f"{self.base_url}/files")
+            headers = {"x-user-id": user_id}
+            response = await self.client.get(f"{self.base_url}{RAGEndpoint.FILES}", headers=headers)
             response.raise_for_status()
-            data = response.json()
-            return data.get('data', [])
+            return response.json()
         except Exception as e:
             logger.error(f"Failed to list files: {e}")
-            return []
+            return {RAGResponseKey.STATUS: RAGStatus.FAILED, RAGResponseKey.MESSAGE: str(e), RAGResponseKey.BODY: {RAGResponseKey.FILES: []}}
 
     async def link_content_to_collection(
         self,
         collection_name: str,
-        content_items: List[Dict[str, str]]
+        content_items: List[Dict[str, str]],
+        user_id: str = "default_user"
     ) -> List[Dict[str, Any]]:
-       
+
         try:
+            headers = {"x-user-id": user_id}
+            url = f"{self.base_url}{RAGEndpoint.COLLECTION_LINK_CONTENT}".format(collection_name=collection_name)
             response = await self.client.post(
-                f"{self.base_url}/{collection_name}/link-content",
-                json=content_items
+                url,
+                json=content_items,
+                headers=headers
             )
             response.raise_for_status()
             return response.json()
@@ -112,8 +123,9 @@ class RAGIntegrationService:
                 "x-user-id": user_id,
                 "Content-Type": "application/json"
             }
+            url = f"{self.base_url}{RAGEndpoint.COLLECTION_QUERY}".format(collection_name=collection_name)
             response = await self.client.post(
-                f"{self.base_url}/{collection_name}/query",
+                url,
                 json=payload,
                 headers=headers
             )
@@ -130,7 +142,7 @@ class RAGIntegrationService:
 
     async def get_embeddings(self, collection_name: str, user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         try:
-            url = f"{self.base_url}/{collection_name}/embeddings"
+            url = f"{self.base_url}{RAGEndpoint.COLLECTION_EMBEDDINGS}".format(collection_name=collection_name)
             headers = {"x-user-id": user_id}
             params = {"limit": min(limit, 500)}
 
@@ -156,24 +168,25 @@ class RAGIntegrationService:
     async def upload_and_link_content(
         self,
         collection_name: str,
-        content_data: Dict[str, Any]
+        content_data: Dict[str, Any],
+        user_id: str = "default_user"
     ) -> bool:
-       
+
         try:
             file_content = content_data.get('content', '').encode('utf-8')
             filename = content_data.get('filename', 'content.txt')
-            file_id = await self.upload_file(file_content, filename)
+            upload_result = await self.upload_file(file_content, filename, user_id)
 
-            if not file_id:
+            if not upload_result:
                 return False
 
             content_items = [{
                 "name": filename,
-                "file_id": file_id,
+                "file_id": upload_result.get('file_id'),
                 "type": content_data.get('content_type', 'text')
             }]
 
-            link_results = await self.link_content_to_collection(collection_name, content_items)
+            link_results = await self.link_content_to_collection(collection_name, content_items, user_id)
 
             for result in link_results:
                 if result.get('status_code') == 200:
@@ -183,6 +196,77 @@ class RAGIntegrationService:
         except Exception as e:
             logger.error(f"Failed to upload and link content: {e}")
             return False
+
+    async def create_collection(self, collection_name: str, user_id: str) -> Dict[str, Any]:
+        try:
+            headers = {"x-user-id": user_id}
+            payload = {"name": collection_name}
+            response = await self.client.post(
+                f"{self.base_url}{RAGEndpoint.COLLECTION}",
+                json=payload,
+                headers=headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to create collection {collection_name}: {e}")
+            return {RAGResponseKey.STATUS: RAGStatus.FAILED, RAGResponseKey.MESSAGE: str(e)}
+
+    async def list_collections(self, user_id: str) -> Dict[str, Any]:
+        try:
+            headers = {"x-user-id": user_id}
+            response = await self.client.get(
+                f"{self.base_url}{RAGEndpoint.COLLECTIONS}",
+                headers=headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to list collections: {e}")
+            return {RAGResponseKey.STATUS: RAGStatus.FAILED, RAGResponseKey.MESSAGE: str(e), RAGResponseKey.BODY: {RAGResponseKey.COLLECTIONS: []}}
+
+    async def get_collection_files(self, collection_name: str, user_id: str) -> Dict[str, Any]:
+        try:
+            headers = {"x-user-id": user_id}
+            url = f"{self.base_url}{RAGEndpoint.COLLECTION_FILES}".format(collection_name=collection_name)
+            response = await self.client.get(
+                url,
+                headers=headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to get files for collection {collection_name}: {e}")
+            return {RAGResponseKey.STATUS: RAGStatus.FAILED, RAGResponseKey.MESSAGE: str(e), RAGResponseKey.BODY: {RAGResponseKey.FILES: []}}
+
+    async def delete_file(self, file_id: str, user_id: str) -> Dict[str, Any]:
+        try:
+            headers = {"x-user-id": user_id}
+            url = f"{self.base_url}{RAGEndpoint.FILE_BY_ID}".format(file_id=file_id)
+            response = await self.client.delete(
+                url,
+                headers=headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to delete file {file_id}: {e}")
+            return {RAGResponseKey.STATUS: RAGStatus.FAILED, RAGResponseKey.MESSAGE: str(e)}
+
+    async def unlink_content(self, collection_name: str, file_ids: List[str], user_id: str) -> List[Dict[str, Any]]:
+        try:
+            headers = {"x-user-id": user_id}
+            url = f"{self.base_url}{RAGEndpoint.COLLECTION_UNLINK_CONTENT}".format(collection_name=collection_name)
+            response = await self.client.post(
+                url,
+                json=file_ids,
+                headers=headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to unlink content from collection {collection_name}: {e}")
+            return []
 
 
 _rag_service = None

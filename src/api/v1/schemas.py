@@ -224,3 +224,92 @@ class QuizEvaluationResult(BaseModel):
     max_possible_score: int
     percentage: float
     results: List[QuizResult]
+
+
+class RAGFileUploadResponse(BaseModel):
+    file_id: str
+    filename: str
+    status: str
+    message: str
+
+
+class RAGCollectionCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class RAGCollectionInfo(BaseModel):
+    name: str
+    created_at: str
+    file_count: int
+
+
+class RAGCollectionResponse(BaseModel):
+    status: str
+    message: str
+    body: Optional[Dict[str, List[RAGCollectionInfo]]] = None
+
+
+class RAGFileItem(BaseModel):
+    file_id: str
+    type: str = Field(default="file")
+    name: str
+
+
+class RAGLinkContentRequest(BaseModel):
+    content_items: List[RAGFileItem]
+
+
+class RAGLinkContentResponse(BaseModel):
+    name: str
+    file_id: str
+    type: str
+    created_at: Optional[str] = None
+    indexing_status: str
+    status_code: int
+    message: str
+
+
+class RAGUnlinkContentRequest(BaseModel):
+    file_ids: List[str]
+
+
+class RAGFileDetail(BaseModel):
+    file_id: str
+    filename: str
+    file_type: str
+    file_size: int
+    upload_date: str
+
+
+class RAGCollectionFilesResponse(BaseModel):
+    status: str
+    message: str
+    body: Optional[Dict[str, List[RAGFileDetail]]] = None
+
+
+class RAGFilesListResponse(BaseModel):
+    status: str
+    message: str
+    body: Optional[Dict[str, List[RAGFileDetail]]] = None
+
+
+class RAGQueryRequest(BaseModel):
+    query: str
+    enable_critic: bool = True
+
+
+class RAGQueryResponse(BaseModel):
+    status: str
+    message: str
+    body: Optional[Dict[str, Any]] = None
+
+
+class RAGEmbedding(BaseModel):
+    text: str
+    source: Optional[str] = None
+
+
+class RAGEmbeddingsResponse(BaseModel):
+    status: str
+    message: str
+    body: Optional[Dict[str, List[RAGEmbedding]]] = None
