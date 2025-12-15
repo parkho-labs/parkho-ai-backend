@@ -8,7 +8,6 @@ from src.api.v1.schemas import (
     StatusCheckResponse,
     StatusItemResponse,
     RetrieveResponse,
-    EnrichedChunk,
     QueryResponse,
     SourceChunk,
     DeleteCollectionResponse,
@@ -157,7 +156,7 @@ class RagService:
             result = response.json()
             
             chunks = [
-                EnrichedChunk(
+                SourceChunk(
                     chunk_id=c.get("chunk_id", "unknown"),
                     chunk_text=c.get("chunk_text", ""),
                     relevance_score=c.get("relevance_score", 0.0),

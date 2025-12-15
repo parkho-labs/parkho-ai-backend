@@ -14,9 +14,8 @@ from src.api.v1.schemas import (
     BatchItemResult,
     IndexingStatusResponse,
     RetrieveResponse,
-    EnrichedChunk,
-    RetrieveFilters,
-    FeedbackResponse,
+    SourceChunk,
+    QueryFilters,
     DeleteCollectionResponse
     )
 from src.api.v1.constants import RAGStatus, RAGResponseKey
@@ -329,7 +328,7 @@ class RAGProxyClient:
         self,
         query: str,
         user_id: str,
-        filters: Optional[RetrieveFilters] = None,
+        filters: Optional[QueryFilters] = None,
         top_k: int = 5,
         include_graph_context: bool = True
     ) -> RetrieveResponse:
@@ -351,7 +350,7 @@ class RAGProxyClient:
             )
 
             chunks = [
-                EnrichedChunk(
+                SourceChunk(
                     chunk_id=c.get("chunk_id", "unknown"),
                     chunk_text=c.get("chunk_text", ""),
                     relevance_score=c.get("relevance_score", 0.0),
@@ -371,26 +370,7 @@ class RAGProxyClient:
             logger.error("RAG proxy: Failed to retrieve content", error=str(e))
             return RetrieveResponse(success=False, results=[])
 
-    async def submit_feedback(
-        self,
-        query: str,
-        doc_ids: List[str],
-        label: int,
-        collection: str
-    ) -> FeedbackResponse:
-        try:
-            result = await self.rag_service.submit_feedback(query, doc_ids, label, collection)
 
-            return FeedbackResponse(
-                status=result.get("status", "FAILURE"),
-                message=result.get("message", "Feedback submission failed")
-            )
-        except Exception as e:
-            logger.error("RAG proxy: Failed to submit feedback", error=str(e))
-            return FeedbackResponse(
-                status="FAILURE",
-                message=f"Failed to submit feedback: {str(e)}"
-            )
 
     async def delete_collection_data(
         self,
