@@ -75,7 +75,7 @@ class WorkflowOrchestrator:
                 # Use collection name as topic query to retrieve relevant context
                 retrieve_response = await self.rag_service.retrieve_content(
                     query=collection_name, 
-                    user_id=getattr(job, "user_id", "test_user_001"), 
+                    user_id=job.user_id, 
                     top_k=50,
                     include_graph_context=False
                 )
