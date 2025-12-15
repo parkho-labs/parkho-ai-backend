@@ -8,7 +8,6 @@ from src.api.v1.schemas import (
     StatusCheckResponse,
     StatusItemResponse,
     RetrieveResponse,
-    EnrichedChunk,
     QueryResponse,
     SourceChunk,
     DeleteCollectionResponse,
