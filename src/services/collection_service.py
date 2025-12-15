@@ -23,8 +23,8 @@ class CollectionService:
 
         try:
             await self.rag_service.delete_collection_data(collection_id, user_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to delete collection data from RAG service, proceeding with local deletion", collection_id=collection_id, error=str(e))
 
         return self.repository.delete(collection_id)
 
