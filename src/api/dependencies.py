@@ -10,10 +10,14 @@ from ..repositories.content_job_repository import ContentJobRepository
 from ..repositories.file_repository import FileRepository
 from ..repositories.quiz_repository import QuizRepository
 from ..repositories.analytics_repository import AnalyticsRepository
+from ..repositories.collection_repository import CollectionRepository
 from ..services.file_storage import FileStorageService
 from ..services.analytics_service import AnalyticsService
 from ..services.analytics_dashboard_service import get_analytics_dashboard_service, AnalyticsDashboardService
 from ..services.llm_service import LLMService
+from ..services.collection_service import CollectionService
+from ..services.rag_service import RagService
+from ..services.gcp_service import GCPService
 from ..models.user import User
 from ..config import get_settings
 
@@ -33,6 +37,8 @@ def get_file_repository(db: Session = Depends(get_db)) -> FileRepository:
 def get_quiz_repository(db: Session = Depends(get_db)) -> QuizRepository:
     return QuizRepository(db)
 
+def get_collection_repository(db: Session = Depends(get_db)) -> CollectionRepository:
+    return CollectionRepository(db)
 
 def get_file_storage(db: Session = Depends(get_db)) -> FileStorageService:
     file_repo = FileRepository(db)
@@ -61,6 +67,20 @@ def get_llm_service() -> LLMService:
         anthropic_model_name=settings.anthropic_model_name,
         google_model_name=settings.google_model_name
     )
+
+def get_gcp_service() -> GCPService:
+    settings = get_settings()
+    return GCPService(settings)
+
+def get_rag_service() -> RagService:
+    from ..services.rag_service import RagService
+    return RagService()
+
+def get_collection_service(
+    repo: CollectionRepository = Depends(get_collection_repository)
+) -> CollectionService:
+    rag_service = get_rag_service()
+    return CollectionService(repo, rag_service)
 
 
 async def get_current_user_required(

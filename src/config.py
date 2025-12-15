@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     temp_files_dir: str = Field(default="/tmp/ai_video_tutor", description="Temporary files directory")
     file_storage_dir: str = Field(default="./uploaded_files", description="Persistent file storage directory")
     
+    max_file_size_mb_pdf: int = Field(default=10, description="Max file size for PDF in MB")
+    max_file_size_mb_docx: int = Field(default=5, description="Max file size for DOC/DOCX in MB")
+    
     whisper_model: str = Field(default="base", description="Whisper model to use")
     audio_chunk_duration_minutes: int = Field(default=10, description="Audio chunk duration in minutes")
     
@@ -114,8 +117,8 @@ class Settings(BaseSettings):
     google_model_name: str = Field(default="gemini-1.5-flash-latest", description="Google Gemini model name")
 
     # Demo Mode Configuration
-    demo_mode: bool = Field(default=False, description="Enable demo mode for development")
-    demo_user_id: str = Field(default="demo-user-123", description="Default demo user ID")
+    demo_mode: bool = Field(default=True, description="Enable demo mode for development")
+    demo_user_id: str = Field(default="test_user_001", description="Default demo user ID")
 
     # YouTube Audio Caching Configuration
     youtube_audio_cache_enabled: bool = Field(

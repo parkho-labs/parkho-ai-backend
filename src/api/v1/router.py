@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from .endpoints import auth, content, quiz, health, analytics, analytics_dashboard, files, collection
+from .endpoints import auth, content, quiz, health, analytics, analytics_dashboard, files, collection, rag
 
 api_router = APIRouter()
 
@@ -17,3 +17,7 @@ api_router.include_router(collection.router, prefix="/collections", tags=["colle
 # Files Router (Formerly RAG) - Mounts at /files
 # Handles Upload, List, Delete
 api_router.include_router(files.router, prefix="/files", tags=["files"])
+
+# RAG Router - Mounts at /rag
+# Handles batch link-content, status polling, retrieve, feedback, delete collection
+api_router.include_router(rag.router, prefix="/rag", tags=["rag"])
