@@ -34,32 +34,7 @@ settings = get_settings()
 router = APIRouter()
 
 
-@router.post("/upload", response_model=FileUploadResponse)
-async def upload_file(file: UploadFile = File(...),
-file_storage = Depends(get_file_storage)
-) -> FileUploadResponse:
-    try:
-        file_id = await file_storage.store_file(file)
 
-        file_metadata = file_storage.get_file_metadata(file_id)
-        if not file_metadata:
-            raise HTTPException(status_code=500, detail="Failed to retrieve file metadata")
-
-        logger.info("File uploaded successfully", file_id=file_id, filename=file.filename)
-
-        return FileUploadResponse(
-            file_id=file_id,
-            filename=file_metadata.filename,
-            file_size=file_metadata.file_size,
-            content_type=file_metadata.content_type,
-            upload_timestamp=file_metadata.upload_timestamp
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Failed to upload file", error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to upload file")
 
 
 @router.post("/process", response_model=List[FileProcessingResult])
@@ -299,14 +274,18 @@ async def delete_all_jobs(
     try:
         from sqlalchemy import delete, text
         from ....models.content_job import ContentJob
+        from ....models.quiz_question import QuizQuestion
 
+        # Delete all quiz questions first (dependent on jobs)
+        repo.session.execute(delete(QuizQuestion))
+        
         # Delete all jobs
         result = repo.session.execute(delete(ContentJob))
         deleted_count = result.rowcount
 
-        # Reset auto-increment to start from 1
-        # SQLite syntax
-        repo.session.execute(text("DELETE FROM sqlite_sequence WHERE name='content_jobs'"))
+        # Reset auto-increment to start from 1 (SQLite specific)
+        if repo.session.bind.dialect.name == "sqlite":
+            repo.session.execute(text("DELETE FROM sqlite_sequence WHERE name='content_jobs'"))
 
         repo.session.commit()
 

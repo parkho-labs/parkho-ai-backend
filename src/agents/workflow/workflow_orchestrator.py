@@ -12,7 +12,7 @@ from ...services.llm_service import LLMService
 from ...utils.database_utils import DatabaseService
 from ...utils.validation_utils import validate_job_exists
 from ...exceptions import WorkflowError
-from ...services.rag_integration_service import get_rag_service
+from ...services.rag_service import get_rag_service
 from ...config import get_settings
 import time
 
@@ -72,8 +72,17 @@ class WorkflowOrchestrator:
             # --- 2. Retrieve Context ---
             await self.job_manager.update_job_progress(job_id, 20.0, "Retrieving content from RAG...")
             try:
-                # Use collection name as topic query
-                content_text = await self.rag_service.get_collection_context(collection_name, collection_name, "default_user")
+                # Use collection name as topic query to retrieve relevant context
+                retrieve_response = await self.rag_service.retrieve_content(
+                    query=collection_name, 
+                    user_id=job.user_id, 
+                    top_k=50,
+                    include_graph_context=False
+                )
+                if retrieve_response and retrieve_response.success:
+                     content_text = "\n\n".join([c.chunk_text for c in retrieve_response.results])
+                else:
+                     content_text = ""
             except Exception as e:
                 logger.error("rag_retrieval_failed", job_id=job_id, error=str(e))
                 raise WorkflowError(f"Failed to retrieve context from RAG: {str(e)}")

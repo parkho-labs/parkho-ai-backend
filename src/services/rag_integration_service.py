@@ -16,20 +16,6 @@ class RAGIntegrationService:
         await self.client.aclose()
 
     async def register_user(self, user_id: str, email: str = None, name: str = None) -> bool:
-        """
-        Register a user with the RAG engine.
-
-        Args:
-            user_id: Firebase UID to use as the user identifier
-            email: User's email address
-            name: User's full name
-
-        Returns:
-            bool: True if registration successful, False otherwise
-
-        Raises:
-            Exception: If registration fails, allowing caller to handle appropriately
-        """
         try:
             payload = {
                 "user_id": user_id,
@@ -55,11 +41,12 @@ class RAGIntegrationService:
             raise Exception(f"RAG registration failed: {str(e)}")
 
 
-    async def upload_file(self, file_content: bytes, filename: str, user_id: str) -> Optional[Dict[str, Any]]:
+    async def upload_file(self, file_content: bytes, filename: str, user_id: str, file_id: str = None) -> Optional[Dict[str, Any]]:
         try:
             files = {"files": (filename, file_content, "application/octet-stream")}
+            data = {"file_id": file_id} if file_id else {}
             headers = {"x-user-id": user_id}
-            response = await self.client.post(f"{self.base_url}{RAGEndpoint.FILES}", files=files, headers=headers)
+            response = await self.client.post(f"{self.base_url}{RAGEndpoint.FILES}", files=files, data=data, headers=headers)
             response.raise_for_status()
             data = response.json()
 
@@ -73,6 +60,43 @@ class RAGIntegrationService:
             return None
         except Exception as e:
             logger.error(f"Failed to upload file {filename}: {e}")
+            return None
+
+    async def upload_file_from_url(
+        self, 
+        file_url: str, 
+        filename: str, 
+        user_id: str, 
+        file_id: str,
+        content_type: str = "application/pdf"
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            payload = {
+                "url": file_url,
+                "file_id": file_id,
+                "filename": filename,
+                "content_type": content_type
+            }
+            headers = {"x-user-id": user_id, "Content-Type": "application/json"}
+            
+            response = await self.client.post(
+                f"{self.base_url}{RAGEndpoint.FILES}", 
+                json=payload, 
+                headers=headers
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get(RAGResponseKey.STATUS) == RAGStatus.SUCCESS:
+                return {
+                    RAGResponseKey.FILE_ID: data.get(RAGResponseKey.FILE_ID, file_id),
+                    RAGResponseKey.FILENAME: data.get(RAGResponseKey.FILENAME, filename),
+                    RAGResponseKey.STATUS: data.get(RAGResponseKey.STATUS),
+                    RAGResponseKey.MESSAGE: data.get(RAGResponseKey.MESSAGE)
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Failed to trigger RAG upload from URL for {filename}: {e}")
             return None
 
     async def list_files(self, user_id: str) -> Dict[str, Any]:
@@ -140,30 +164,7 @@ class RAGIntegrationService:
                 "chunks": []
             }
 
-    async def get_embeddings(self, collection_name: str, user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        try:
-            url = f"{self.base_url}{RAGEndpoint.COLLECTION_EMBEDDINGS}".format(collection_name=collection_name)
-            headers = {"x-user-id": user_id}
-            params = {"limit": min(limit, 500)}
 
-            logger.info(f"RAG embeddings call: {url} with user_id={user_id}")
-            response = await self.client.get(url, headers=headers, params=params)
-            response.raise_for_status()
-
-            data = response.json()
-            logger.info(f"RAG response status: {data.get('status')}, embeddings count: {len(data.get('body', {}).get('embeddings', []))}")
-
-            return data.get("body", {}).get("embeddings", [])
-        except Exception as e:
-            logger.error(f"Failed to get embeddings for {collection_name} with user {user_id}: {e}")
-            return []
-
-    async def get_collection_context(self, collection_name: str, topic: str, user_id: str) -> str:
-        embeddings = await self.get_embeddings(collection_name, user_id, 50)
-        if not embeddings:
-            return ""
-        chunks = [e.get('text', '') for e in embeddings if e.get('text')]
-        return "\n\n".join(chunks)
 
     async def upload_and_link_content(
         self,
@@ -282,10 +283,6 @@ class RAGIntegrationService:
                 "enable_critic": True
             }
             headers = {"x-user-id": user_id}
-            # Depending on RAG API, likely use a generic /retrieve or /query endpoint
-            # Assuming RAGEndpoint.QUERY exists or we reuse a similar structure
-            # If RAG engine supports dynamic queries, we might need a new endpoint constant
-            # For now, let's assume valid endpoint is /query (Need to check constants)
             response = await self.client.post(
                 f"{self.base_url}/query", 
                 json=payload,
@@ -295,7 +292,108 @@ class RAGIntegrationService:
             return response.json()
         except Exception as e:
             logger.error(f"Failed to query with filters for files {file_ids}: {e}")
-            raise HTTPException(status_code=502, detail="Failed to query the RAG service.")
+            raise
+
+    async def batch_link_content(
+        self,
+        items: List[Dict[str, Any]],
+        user_id: str
+    ) -> Dict[str, Any]:
+        try:
+            headers = {"x-user-id": user_id}
+            response = await self.client.post(
+                f"{self.base_url}{RAGEndpoint.LINK_CONTENT}",
+                json={"items": items},
+                headers=headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to batch link content: {e}")
+            return {
+                "message": "Batch processing failed",
+                "batch_id": "sync_job",
+                "results": [{"file_id": item.get("file_id", ""), "status": "failed", "error": str(e)} for item in items]
+            }
+
+    async def get_indexing_status(
+        self,
+        file_id: str,
+        user_id: str
+    ) -> Dict[str, Any]:
+        try:
+            headers = {"x-user-id": user_id}
+            # Updated to POST /status with file_ids list
+            response = await self.client.post(
+                f"{self.base_url}{RAGEndpoint.STATUS}", 
+                json={"file_ids": [file_id]},
+                headers=headers
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            # Extract result for specific file
+            results = data.get("results", [])
+            for res in results:
+                if res.get("file_id") == file_id:
+                    # Map new response format to expected format if needed, or return as is
+                    return res
+            
+            return {"file_id": file_id, "status": "UNKNOWN", "message": "Status not found in response"}
+        except Exception as e:
+            logger.error(f"Failed to get indexing status for {file_id}: {e}")
+            return {"file_id": file_id, "status": "INDEXING_FAILED", "error": str(e)}
+
+    async def retrieve_content(
+        self,
+        query: str,
+        user_id: str,
+        filters: Optional[Dict[str, Any]] = None,
+        top_k: int = 5,
+        include_graph_context: bool = True
+    ) -> Dict[str, Any]:
+        try:
+            payload = {
+                "query": query,
+                "top_k": top_k,
+                "include_graph_context": include_graph_context
+            }
+            if filters:
+                payload["filters"] = filters
+
+            headers = {"x-user-id": user_id}
+            response = await self.client.post(
+                f"{self.base_url}{RAGEndpoint.RETRIEVE}",
+                json=payload,
+                headers=headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to retrieve content: {e}")
+            return {"success": False, "results": []}
+
+
+
+    async def delete_collection_data(
+        self,
+        collection_id: str,
+        user_id: str
+    ) -> Dict[str, Any]:
+        try:
+            headers = {"x-user-id": user_id}
+            payload = {"collection_id": collection_id}
+            response = await self.client.delete(
+                f"{self.base_url}{RAGEndpoint.DELETE_COLLECTION}",
+                json=payload,
+                headers=headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Failed to delete collection {collection_id}: {e}")
+            return {"message": f"Failed to delete collection: {str(e)}"}
+
 
 _rag_service = None
 

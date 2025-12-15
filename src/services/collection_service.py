@@ -1,11 +1,11 @@
 from typing import List, Dict, Any
 from fastapi import HTTPException
 from src.repositories.collection_repository import CollectionRepository
-from src.services.rag_integration_service import RAGIntegrationService
+from src.services.rag_service import RagService
 from src.models.collection import Collection
 
 class CollectionService:
-    def __init__(self, repository: CollectionRepository, rag_service: RAGIntegrationService):
+    def __init__(self, repository: CollectionRepository, rag_service: RagService):
         self.repository = repository
         # We need RAG service only for Querying, not for Management anymore!
         self.rag_service = rag_service
@@ -20,6 +20,12 @@ class CollectionService:
         collection = self.repository.get_by_id(collection_id)
         if not collection or collection.user_id != user_id:
             raise HTTPException(status_code=404, detail="Collection not found or unauthorized")
+
+        try:
+            await self.rag_service.delete_collection_data(collection_id, user_id)
+        except Exception as e:
+            logger.warning("Failed to delete collection data from RAG service, proceeding with local deletion", collection_id=collection_id, error=str(e))
+
         return self.repository.delete(collection_id)
 
     async def link_files(self, user_id: str, collection_id: str, file_ids: List[str]) -> List[str]:

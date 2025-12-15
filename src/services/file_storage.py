@@ -1,7 +1,7 @@
 import os
 import shutil
 import uuid
-from typing import List, Optional
+from typing import Optional
 from fastapi import UploadFile, HTTPException
 from pathlib import Path
 
@@ -9,6 +9,7 @@ from ..repositories.file_repository import FileRepository
 from ..models.uploaded_file import UploadedFile
 from ..config import get_settings
 from ..api.v1.schemas import StandardAPIResponse
+from ..api.v1.constants import RAGIndexingStatus
 
 settings = get_settings()
 
@@ -20,9 +21,9 @@ class FileStorageService:
         self.storage_dir.mkdir(exist_ok=True)
 
         self.file_limits = {
-            "pdf": 10 * 1024 * 1024,   # 10MB
-            "docx": 5 * 1024 * 1024,   # 5MB
-            "doc": 5 * 1024 * 1024,    # 5MB
+            "pdf": settings.max_file_size_mb_pdf * 1024 * 1024,
+            "docx": settings.max_file_size_mb_docx * 1024 * 1024,
+            "doc": settings.max_file_size_mb_docx * 1024 * 1024,
         }
         self.allowed_extensions = {".pdf", ".docx", ".doc"}
 
@@ -49,13 +50,14 @@ class FileStorageService:
 
         return True, None
 
-    async def store_file(self, file: UploadFile, ttl_hours: int = 24) -> str:
+    async def store_file(self, file: UploadFile, ttl_hours: int = 24, file_id: Optional[str] = None, indexing_status: str = RAGIndexingStatus.INDEXING_PENDING) -> str:
         is_valid, error_msg = self.validate_file(file)
         if not is_valid:
             raise HTTPException(status_code=400, detail=error_msg)
 
         try:
-            file_id = str(uuid.uuid4())
+            if not file_id:
+                file_id = str(uuid.uuid4())
             file_ext = os.path.splitext(file.filename)[1].lower()
             stored_filename = f"{file_id}{file_ext}"
             file_path = self.storage_dir / stored_filename
@@ -63,14 +65,15 @@ class FileStorageService:
             with open(file_path, "wb") as stored_file:
                 shutil.copyfileobj(file.file, stored_file)
 
-            # Persist metadata to DB
             self.file_repo.create_file(
                 file_id=file_id,
                 filename=file.filename,
                 file_path=str(file_path),
                 file_size=file_path.stat().st_size,
-                content_type=file.content_type,
-                ttl_hours=ttl_hours
+                content_type="FILE",
+                file_type=file.content_type,
+                ttl_hours=ttl_hours,
+                indexing_status=indexing_status
             )
 
             return file_id

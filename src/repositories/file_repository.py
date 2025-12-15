@@ -10,7 +10,7 @@ class FileRepository:
         self.session = session
 
     def create_file(self, file_id: str, filename: str, file_path: str, file_size: int, 
-    content_type: str = None, ttl_hours: int = 24) -> UploadedFile:
+    content_type: str = None, file_type: str = None, ttl_hours: int = 24, indexing_status: str = "INDEXING_PENDING") -> UploadedFile:
 
         uploaded_file = UploadedFile(
             id=file_id,
@@ -18,7 +18,9 @@ class FileRepository:
             file_path=file_path,
             file_size=file_size,
             content_type=content_type,
-            ttl_hours=ttl_hours
+            file_type=file_type,
+            ttl_hours=ttl_hours,
+            indexing_status=indexing_status
         )
         self.session.add(uploaded_file)
         self.session.commit()

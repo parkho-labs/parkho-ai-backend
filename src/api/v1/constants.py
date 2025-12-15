@@ -36,5 +36,13 @@ class RAGEndpoint:
     COLLECTION_UNLINK_CONTENT = "/{collection_name}/unlink-content"
     COLLECTION_FILES = "/{collection_name}/files"
     COLLECTION_QUERY = "/{collection_name}/query"
-    COLLECTION_EMBEDDINGS = "/{collection_name}/embeddings"
+    COLLECTION_QUERY = "/{collection_name}/query"
+    # COLLECTION_EMBEDDINGS removed per spec
     USER_REGISTER = "/users/register"
+    LINK_CONTENT = "/link-content"
+    STATUS = "/status" # Was /status/{file_id}
+    QUERY = "/query" # New
+    RETRIEVE = "/retrieve"
+    # FEEDBACK Removed
+    DELETE_COLLECTION = "/delete/collection"
+    DELETE_FILE = "/delete/file" # New batch delete endpoint

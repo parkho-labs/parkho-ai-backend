@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Generic, TypeVar, Any
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 T = TypeVar('T')
 
@@ -22,11 +22,11 @@ class StandardAPIResponse(BaseModel, Generic[T]):
 
 
 class JobStatus(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCESS = "success"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+    PENDING = "JOB_PENDING"
+    RUNNING = "JOB_RUNNING"
+    SUCCESS = "JOB_SUCCESS"
+    FAILED = "JOB_FAILED"
+    CANCELLED = "JOB_CANCELLED"
 
 
 class QuestionType(str, Enum):
@@ -116,6 +116,8 @@ class ContentJobBase(BaseModel):
     title: Optional[str]
 
 
+
+
 class ContentJobResponse(ContentJobBase):
     id: int
     progress: float = Field(..., ge=0.0, le=100.0)
@@ -138,6 +140,24 @@ class FileUploadResponse(BaseModel):
     file_size: int
     content_type: str
     upload_timestamp: datetime
+
+
+class FileUploadUrlRequest(BaseModel):
+    filename: str
+    content_type: str
+    file_size: int
+
+
+class PresignedUrlResponse(BaseModel):
+    upload_url: str
+    file_id: str
+    gcs_path: str
+    cleanup_after: datetime
+
+
+class FileConfirmRequest(BaseModel):
+    file_id: str
+    indexing: bool = True
 
 
 class FileProcessingResult(BaseModel):
@@ -328,3 +348,95 @@ class RAGEmbeddingsResponse(BaseModel):
     status: str
     message: str
     body: Optional[Dict[str, List[RAGEmbedding]]] = None
+
+
+class LinkContentItem(BaseModel):
+    type: str
+    file_id: str
+    collection_id: Optional[str] = None
+    gcs_url: Optional[str] = None
+    url: Optional[str] = None
+
+
+class BatchLinkRequest(BaseModel):
+    items: List[LinkContentItem]
+
+
+class BatchItemResult(BaseModel):
+    file_id: str
+    status: str
+    error: Optional[str] = None
+
+
+class BatchLinkResponse(BaseModel):
+    message: str
+    batch_id: str
+    results: List[BatchItemResult]
+
+
+class StatusCheckRequest(BaseModel):
+    file_ids: List[str]
+
+class StatusItemResponse(BaseModel):
+    file_id: str
+    name: Optional[str] = None
+    source: Optional[str] = None
+    status: str
+    error: Optional[str] = None
+
+class StatusCheckResponse(BaseModel):
+    message: str
+    results: List[StatusItemResponse]
+
+class QueryFilters(BaseModel):
+    collection_ids: Optional[List[str]] = None
+    file_ids: Optional[List[str]] = None
+
+class QueryRequest(BaseModel):
+    query: str
+    filters: Optional[QueryFilters] = None
+    top_k: int = 5
+    include_sources: bool = False
+
+class SourceChunk(BaseModel):
+    chunk_id: str
+    chunk_text: str
+    relevance_score: float
+    file_id: str
+    page_number: Optional[int] = None
+    timestamp: Optional[str] = None
+    concepts: List[str] = []
+
+class QueryResponse(BaseModel):
+    success: bool
+    answer: str
+    sources: Optional[List[SourceChunk]] = None
+
+# Retrieve works same as Query but chunks only. 
+# Reusing schemas where possible but keeping distinct if needed.
+# Doc says Retrieve works on chunks only. 
+# RetrieveRequest in doc: query, filters, top_k, include_graph_context
+# The existing RetrieveRequest matches doc roughly (include_graph_context present).
+
+class RetrieveRequest(BaseModel):
+    query: str
+    filters: Optional[QueryFilters] = None
+    top_k: int = 5
+    include_graph_context: bool = True
+
+class RetrieveResponse(BaseModel):
+    success: bool
+    results: List[SourceChunk]
+
+
+class DeleteFileRequest(BaseModel):
+    file_ids: List[str]
+
+class DeleteFileResponse(BaseModel):
+    message: str
+
+class DeleteCollectionRequest(BaseModel):
+    collection_id: str
+
+class DeleteCollectionResponse(BaseModel):
+    message: str

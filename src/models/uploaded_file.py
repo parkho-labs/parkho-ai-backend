@@ -3,6 +3,7 @@ from sqlalchemy import Column, String, Integer, DateTime
 from sqlalchemy.sql import func
 
 from ..core.database import Base
+from ..api.v1.constants import RAGIndexingStatus
 
 
 class UploadedFile(Base):
@@ -12,18 +13,20 @@ class UploadedFile(Base):
     filename = Column(String, nullable=False)
     file_path = Column(String, nullable=False)
     file_size = Column(Integer, nullable=False)
-    content_type = Column(String, nullable=True)
+    file_type = Column(String, nullable=True) # e.g. pdf, docx, or None if not a file
+    content_type = Column(String, nullable=True) # YOUTUBE, WEB, FILE
     upload_timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     cleanup_after = Column(DateTime(timezone=True), nullable=False)
     # Status: pending, indexing, completed, failed
-    indexing_status = Column(String, default="pending", nullable=False)
+    indexing_status = Column(String, default=RAGIndexingStatus.INDEXING_PENDING, nullable=False)
 
-    def __init__(self, id: str, filename: str, file_path: str, file_size: int, content_type: str = None, ttl_hours: int = 24, indexing_status: str = "pending"):
+    def __init__(self, id: str, filename: str, file_path: str, file_size: int, content_type: str = None, file_type: str = None, ttl_hours: int = 24, indexing_status: str = RAGIndexingStatus.INDEXING_PENDING):
         self.id = id
         self.filename = filename
         self.file_path = file_path
         self.file_size = file_size
         self.content_type = content_type
+        self.file_type = file_type
         self.cleanup_after = datetime.utcnow() + timedelta(hours=ttl_hours)
         self.indexing_status = indexing_status
 
