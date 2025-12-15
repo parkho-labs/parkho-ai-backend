@@ -164,30 +164,7 @@ class RAGIntegrationService:
                 "chunks": []
             }
 
-    async def get_embeddings(self, collection_name: str, user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        try:
-            url = f"{self.base_url}{RAGEndpoint.COLLECTION_EMBEDDINGS}".format(collection_name=collection_name)
-            headers = {"x-user-id": user_id}
-            params = {"limit": min(limit, 500)}
 
-            logger.info(f"RAG embeddings call: {url} with user_id={user_id}")
-            response = await self.client.get(url, headers=headers, params=params)
-            response.raise_for_status()
-
-            data = response.json()
-            logger.info(f"RAG response status: {data.get('status')}, embeddings count: {len(data.get('body', {}).get('embeddings', []))}")
-
-            return data.get("body", {}).get("embeddings", [])
-        except Exception as e:
-            logger.error(f"Failed to get embeddings for {collection_name} with user {user_id}: {e}")
-            return []
-
-    async def get_collection_context(self, collection_name: str, topic: str, user_id: str) -> str:
-        embeddings = await self.get_embeddings(collection_name, user_id, 50)
-        if not embeddings:
-            return ""
-        chunks = [e.get('text', '') for e in embeddings if e.get('text')]
-        return "\n\n".join(chunks)
 
     async def upload_and_link_content(
         self,
@@ -346,10 +323,23 @@ class RAGIntegrationService:
     ) -> Dict[str, Any]:
         try:
             headers = {"x-user-id": user_id}
-            url = f"{self.base_url}{RAGEndpoint.STATUS}".format(file_id=file_id)
-            response = await self.client.get(url, headers=headers)
+            # Updated to POST /status with file_ids list
+            response = await self.client.post(
+                f"{self.base_url}{RAGEndpoint.STATUS}", 
+                json={"file_ids": [file_id]},
+                headers=headers
+            )
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            
+            # Extract result for specific file
+            results = data.get("results", [])
+            for res in results:
+                if res.get("file_id") == file_id:
+                    # Map new response format to expected format if needed, or return as is
+                    return res
+            
+            return {"file_id": file_id, "status": "UNKNOWN", "message": "Status not found in response"}
         except Exception as e:
             logger.error(f"Failed to get indexing status for {file_id}: {e}")
             return {"file_id": file_id, "status": "INDEXING_FAILED", "error": str(e)}
@@ -383,29 +373,7 @@ class RAGIntegrationService:
             logger.error(f"Failed to retrieve content: {e}")
             return {"success": False, "results": []}
 
-    async def submit_feedback(
-        self,
-        query: str,
-        doc_ids: List[str],
-        label: int,
-        collection: str
-    ) -> Dict[str, Any]:
-        try:
-            payload = {
-                "query": query,
-                "doc_ids": doc_ids,
-                "label": label,
-                "collection": collection
-            }
-            response = await self.client.post(
-                f"{self.base_url}{RAGEndpoint.FEEDBACK}",
-                json=payload
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Failed to submit feedback: {e}")
-            return {"status": "FAILURE", "message": str(e)}
+
 
     async def delete_collection_data(
         self,

@@ -424,18 +424,9 @@ class RetrieveRequest(BaseModel):
     top_k: int = 5
     include_graph_context: bool = True
 
-class EnrichedChunk(BaseModel):
-    chunk_id: str
-    chunk_text: str
-    relevance_score: float
-    file_id: str
-    page_number: Optional[int] = None
-    timestamp: Optional[str] = None
-    concepts: List[str] = []
-
 class RetrieveResponse(BaseModel):
     success: bool
-    results: List[EnrichedChunk]
+    results: List[SourceChunk]
 
 
 class DeleteFileRequest(BaseModel):

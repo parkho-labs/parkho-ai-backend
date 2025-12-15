@@ -36,9 +36,8 @@ class RAGEndpoint:
     COLLECTION_UNLINK_CONTENT = "/{collection_name}/unlink-content"
     COLLECTION_FILES = "/{collection_name}/files"
     COLLECTION_QUERY = "/{collection_name}/query"
-    COLLECTION_EMBEDDINGS = "/embeddings" # Still used? Spec removed Debug APIs. User said "update files". I should remove if strict.
-    # Actually, let's keep it safe or remove if user explicitly said so. 
-    # User removed "Debug APIs" section. I will remove EMBEDDINGS.
+    COLLECTION_QUERY = "/{collection_name}/query"
+    # COLLECTION_EMBEDDINGS removed per spec
     USER_REGISTER = "/users/register"
     LINK_CONTENT = "/link-content"
     STATUS = "/status" # Was /status/{file_id}

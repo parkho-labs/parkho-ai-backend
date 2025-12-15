@@ -44,23 +44,23 @@ class ContentParsingCoordinator:
 
             match content_type:
                 case InputType.YOUTUBE:
-                    tasks.append(asyncio.create_task(self._parse_youtube(source_id, user_id)))
+                    tasks.append(asyncio.create_task(self._parse_youtube(source_id)))
                 case InputType.WEB_URL:
-                    tasks.append(asyncio.create_task(self._parse_web(source_id, user_id)))
+                    tasks.append(asyncio.create_task(self._parse_web(source_id)))
                 case InputType.COLLECTION:
                     tasks.append(asyncio.create_task(self._parse_collection(source_id, user_id)))
                 case InputType.FILES:
-                    tasks.append(asyncio.create_task(self._parse_file(content_type, source_id, user_id)))
+                    tasks.append(asyncio.create_task(self._parse_file(content_type, source_id)))
                 case _:
                     logger.warning("unsupported_content_type", content_type=content_type, source_id=source_id)
 
         return tasks
 
-    async def _parse_youtube(self, url: str, user_id: str):
-        return await self._parse_url(InputType.YOUTUBE.value, url, user_id)
+    async def _parse_youtube(self, url: str):
+        return await self._parse_url(InputType.YOUTUBE.value, url)
 
-    async def _parse_web(self, url: str, user_id: str):
-        return await self._parse_url(InputType.WEB_URL.value, url, user_id)
+    async def _parse_web(self, url: str):
+        return await self._parse_url(InputType.WEB_URL.value, url)
 
     async def _parse_collection(self, collection_name: str, user_id: str):
         try:
@@ -116,7 +116,7 @@ class ContentParsingCoordinator:
             "source_count": len(results)
         }
 
-    async def _parse_url(self, content_type: str, url: str, user_id: str):
+    async def _parse_url(self, content_type: str, url: str):
         try:
             parser = self.parser_factory.get_parser(content_type)
             if not parser:
@@ -130,7 +130,7 @@ class ContentParsingCoordinator:
             logger.error("url_parse_failed", content_type=content_type, url=url[:100], error=str(e))
             raise ParsingError(f"Failed to parse {content_type}: {str(e)}")
 
-    async def _parse_file(self, content_type: str, file_id: str, user_id: str):
+    async def _parse_file(self, content_type: str, file_id: str):
         try:
             uploaded_file = self.file_repository.get_by_id(file_id)
             if not uploaded_file:
