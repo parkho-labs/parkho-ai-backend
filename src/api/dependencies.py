@@ -73,8 +73,8 @@ def get_gcp_service() -> GCPService:
     return GCPService(settings)
 
 def get_rag_service() -> RagService:
-    from ..services.rag_service import RagService
-    return RagService()
+    from ..services.rag_service import get_rag_service as get_rag_service_factory
+    return get_rag_service_factory()
 
 def get_collection_service(
     repo: CollectionRepository = Depends(get_collection_repository)
