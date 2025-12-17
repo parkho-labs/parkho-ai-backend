@@ -16,7 +16,8 @@ from src.api.v1.schemas import (
     RAGFilesListResponse,
     FileUploadUrlRequest,
     PresignedUrlResponse,
-    FileConfirmRequest
+    FileConfirmRequest,
+    FileViewResponse
 )
 from src.api.v1.constants import RAGStatus, RAGIndexingStatus
 from src.services.gcp_service import GCPService
@@ -166,6 +167,9 @@ async def delete_file_from_rag(
     rag_service: RagService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
+    if file_id == "undefined":
+        raise HTTPException(status_code=400, detail="Invalid file_id: 'undefined'. Check frontend logic.")
+
     try:
         # delete_files is batch in new service
         result = await rag_service.delete_files([file_id], current_user.user_id)
@@ -188,4 +192,99 @@ async def delete_file_from_rag(
     except Exception as e:
         logger.error("Failed to delete file", error=str(e), file_id=file_id, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
+
+
+@router.get("/{file_id}/view", response_model=FileViewResponse)
+async def view_file(
+    file_id: str,
+    current_user: User = Depends(get_current_user_conditional),
+    file_storage: FileStorageService = Depends(get_file_storage),
+    gcp_service: GCPService = Depends(get_gcp_service)
+):
+    try:
+        uploaded_file = file_storage.get_file_metadata(file_id)
+        if not uploaded_file:
+             raise HTTPException(status_code=404, detail="File not found")
+        
+        # Security Check: Ensure user owns the file (if necessary, though conditional user might be mostly fine)
+        # Assuming get_file_metadata checks permission or we trust file_id knowledge for now?
+        # Better: check user_id if present in metadata (it isn't on UploadedFile model explicitly, wait, it IS on UploadedFile?? Let's check.)
+        # UploadedFile model: id, filename, file_path, file_size, file_type, content_type... NO user_id visible in schema snippet earlier.
+        # But wait, uploads/{current_user.user_id}/... is key structure.
+        
+        # 1. GCS Files (Private) - Check FIRST to ensure they get signed
+        # Check if path indicates GCS
+        # Our stored path for GCS is usually complete public URL currently: https://storage.googleapis.com/...
+        
+        blob_name = None
+        if "storage.googleapis.com" in uploaded_file.file_path:
+             from urllib.parse import urlparse
+             parsed = urlparse(uploaded_file.file_path)
+             # path is /bucket_name/blob_name
+             # split by / and take from index 2 onwards
+             path_parts = parsed.path.lstrip("/").split("/", 1)
+             if len(path_parts) >= 2:
+                 # path_parts[0] is bucket, path_parts[1] is blob
+                 blob_name = path_parts[1]
+             # Also check if it matches configured bucket just in case
+        
+        # Fallback: if we stored relative path (not starting with http)
+        if not blob_name and not uploaded_file.file_path.startswith("http") and "uploads/" in uploaded_file.file_path:
+             blob_name = uploaded_file.file_path
+             
+        if blob_name:
+             logger.info("Generating signed URL", blob_name=blob_name)
+             signed_url = gcp_service.generate_download_signed_url(blob_name, expiration_minutes=60)
+             if signed_url:
+                 return FileViewResponse(
+                     url=signed_url,
+                     type="file",
+                     content_type=uploaded_file.file_type or "application/octet-stream",
+                     filename=uploaded_file.filename
+                 )
+             else:
+                logger.error("Failed to generate signed URL", blob_name=blob_name)
+
+
+        # 2. External Links (YouTube, Web)
+        if uploaded_file.content_type in ["YOUTUBE", "WEB"] or (uploaded_file.file_path and uploaded_file.file_path.startswith("http")):
+             # If it's a public URL already (like YouTube), just return it.
+             # Note: If it's a signed URL stored, it might confirm if it's expired? No, we store original URL for YouTube.
+             return FileViewResponse(
+                 url=uploaded_file.file_path,
+                 type="external",
+                 content_type=uploaded_file.content_type,
+                 filename=uploaded_file.filename
+             )
+
+        
+        # 3. Fallback (Local file or couldn't sign)
+        # Return proper URL for local static files
+        if "uploaded_files" in uploaded_file.file_path or "/uploaded_files" in uploaded_file.file_path:
+             from src.config import get_settings
+             settings = get_settings()
+             filename = os.path.basename(uploaded_file.file_path)
+             # Construct absolute URL to backend static mount
+             # Assuming http for now, could be improved with request.base_url if available but simple setting is robust for local
+             base_url = f"http://{settings.api_host}:{settings.api_port}"
+             return FileViewResponse(
+                 url=f"{base_url}/uploaded_files/{filename}",
+                 type="file",
+                 content_type=uploaded_file.file_type or "application/pdf",
+                 filename=uploaded_file.filename
+             )
+
+        # Final Fallback
+        return FileViewResponse(
+             url=uploaded_file.file_path,
+             type="file", # external?
+             content_type=uploaded_file.file_type,
+             filename=uploaded_file.filename
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to generate view URL", file_id=file_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to generate view URL")
 

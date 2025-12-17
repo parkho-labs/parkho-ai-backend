@@ -3,6 +3,9 @@ from fastapi import HTTPException
 from src.repositories.collection_repository import CollectionRepository
 from src.services.rag_service import RagService
 from src.models.collection import Collection
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 class CollectionService:
     def __init__(self, repository: CollectionRepository, rag_service: RagService):
@@ -22,7 +25,7 @@ class CollectionService:
             raise HTTPException(status_code=404, detail="Collection not found or unauthorized")
 
         try:
-            await self.rag_service.delete_collection_data(collection_id, user_id)
+            await self.rag_service.delete_collection(collection_id, user_id)
         except Exception as e:
             logger.warning("Failed to delete collection data from RAG service, proceeding with local deletion", collection_id=collection_id, error=str(e))
 
@@ -78,4 +81,5 @@ class CollectionService:
             return {"answer": "Collection is empty.", "chunks": []}
 
         # Call RAG Service with file filter
-        return await self.rag_service.query_with_filters(query, user_id, file_ids)
+        result = await self.rag_service.query_content(query=query, user_id=user_id, filters={"file_ids": file_ids})
+        return result.model_dump()

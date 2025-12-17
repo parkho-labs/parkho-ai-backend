@@ -106,7 +106,7 @@ async def batch_link_content(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/status", response_model=StatusCheckResponse)
+@router.post("/collection/status", response_model=StatusCheckResponse)
 async def check_indexing_status(
     request: StatusCheckRequest,
     current_user: User = Depends(get_current_user_conditional),
@@ -172,6 +172,8 @@ async def delete_files(
     current_user: User = Depends(get_current_user_conditional),
     rag_service: RagService = Depends(get_rag_service)
 ) -> DeleteFileResponse:
+    if "undefined" in request.file_ids:
+        raise HTTPException(status_code=400, detail="Invalid file_id: 'undefined' found in request.")
     try:
         return await rag_service.delete_files(request.file_ids, current_user.user_id)
     except Exception as e:

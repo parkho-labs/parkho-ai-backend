@@ -2,7 +2,8 @@ from sqlalchemy.orm import Session
 from src.models.collection import Collection, collection_files
 from src.models.uploaded_file import UploadedFile
 from typing import List, Optional
-from sqlalchemy import insert, delete
+from sqlalchemy import delete
+from sqlalchemy.dialects.postgresql import insert
 
 class CollectionRepository:
     def __init__(self, db: Session):

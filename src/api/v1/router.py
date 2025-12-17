@@ -18,6 +18,5 @@ api_router.include_router(collection.router, prefix="/collections", tags=["colle
 # Handles Upload, List, Delete
 api_router.include_router(files.router, prefix="/files", tags=["files"])
 
-# RAG Router - Mounts at /rag
-# Handles batch link-content, status polling, retrieve, feedback, delete collection
-api_router.include_router(rag.router, prefix="/rag", tags=["rag"])
+# RAG Router - Mounts at root (e.g. /link-content, /query) to match external RAG engine spec
+api_router.include_router(rag.router, tags=["rag"])

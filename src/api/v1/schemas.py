@@ -155,6 +155,14 @@ class PresignedUrlResponse(BaseModel):
     cleanup_after: datetime
 
 
+
+class FileViewResponse(BaseModel):
+    url: str
+    type: str = Field(..., description="'file' or 'external'")
+    content_type: Optional[str] = None
+    filename: Optional[str] = None
+
+
 class FileConfirmRequest(BaseModel):
     file_id: str
     indexing: bool = True
