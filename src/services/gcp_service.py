@@ -104,3 +104,21 @@ class GCPService:
         except Exception as e:
             logger.error("Failed to open file stream", error=str(e))
             return None
+
+    def delete_file(self, blob_name: str) -> bool:
+        """Deletes a file from the GCS bucket."""
+        if not self.client:
+            return False
+            
+        try:
+            bucket = self.client.bucket(self.bucket_name)
+            blob = bucket.blob(blob_name)
+            if blob.exists():
+                blob.delete()
+                logger.info("Deleted file from GCS", blob_name=blob_name)
+                return True
+            logger.warning("File not found in GCS for deletion", blob_name=blob_name)
+            return False
+        except Exception as e:
+            logger.error("Failed to delete file from GCS", error=str(e), blob_name=blob_name)
+            return False
