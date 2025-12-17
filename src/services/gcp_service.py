@@ -4,6 +4,7 @@ from typing import Optional
 from google.cloud import storage
 from google.oauth2 import service_account
 import structlog
+import os
 
 from src.config import Settings
 
@@ -16,13 +17,21 @@ class GCPService:
         self.bucket_name = settings.storage_bucket
         self.project_id = settings.gcp_project_id
         
+        # Try to load from service account file first (Production/Configured), fallback to ADC (Local/Dev)
         try:
-            if settings.firebase_service_account_path:
-                 self.credentials = service_account.Credentials.from_service_account_file(
-                     settings.firebase_service_account_path
-                 )
-                 self.client = storage.Client(credentials=self.credentials, project=self.project_id)
+            if settings.firebase_service_account_path and os.path.exists(settings.firebase_service_account_path):
+                 try:
+                     logger.info("Loading GCP credentials from service account file", path=settings.firebase_service_account_path)
+                     self.credentials = service_account.Credentials.from_service_account_file(
+                         settings.firebase_service_account_path
+                     )
+                     self.client = storage.Client(credentials=self.credentials, project=self.project_id)
+                 except Exception as e:
+                     logger.warning("Failed to load service account file, falling back to ADC", error=str(e))
+                     logger.info("Initializing GCP Storage Client using ADC")
+                     self.client = storage.Client(project=self.project_id)
             else:
+                logger.info("No service account file found or configured, using ADC")
                 self.client = storage.Client(project=self.project_id)
         except Exception as e:
             logger.error("Failed to initialize GCP Storage Client", error=str(e))
@@ -81,3 +90,35 @@ class GCPService:
         except Exception as e:
             logger.error("Failed to generate download signed URL", error=str(e))
             return None
+
+    def open_file_stream(self, blob_name: str):
+        """Opens a stream to the GCS blob for reading."""
+        if not self.client:
+            return None
+        try:
+            bucket = self.client.bucket(self.bucket_name)
+            blob = bucket.blob(blob_name)
+            if not blob.exists():
+                return None
+            return blob.open("rb")
+        except Exception as e:
+            logger.error("Failed to open file stream", error=str(e))
+            return None
+
+    def delete_file(self, blob_name: str) -> bool:
+        """Deletes a file from the GCS bucket."""
+        if not self.client:
+            return False
+            
+        try:
+            bucket = self.client.bucket(self.bucket_name)
+            blob = bucket.blob(blob_name)
+            if blob.exists():
+                blob.delete()
+                logger.info("Deleted file from GCS", blob_name=blob_name)
+                return True
+            logger.warning("File not found in GCS for deletion", blob_name=blob_name)
+            return False
+        except Exception as e:
+            logger.error("Failed to delete file from GCS", error=str(e), blob_name=blob_name)
+            return False

@@ -143,6 +143,13 @@ def create_application() -> FastAPI:
     from .api.v1.endpoints import health
     app.include_router(health.router, tags=["health"])
 
+    # Mount Static Files for Uploads
+    from fastapi.staticfiles import StaticFiles
+    import os
+    os.makedirs(settings.file_storage_dir, exist_ok=True)
+    app.mount("/uploaded_files", StaticFiles(directory=settings.file_storage_dir), name="uploads")
+
+
     # Include API router
     app.include_router(api_router, prefix="/api/v1")
 

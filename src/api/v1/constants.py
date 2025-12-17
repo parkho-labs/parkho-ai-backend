@@ -40,9 +40,10 @@ class RAGEndpoint:
     # COLLECTION_EMBEDDINGS removed per spec
     USER_REGISTER = "/users/register"
     LINK_CONTENT = "/link-content"
-    STATUS = "/status" # Was /status/{file_id}
-    QUERY = "/query" # New
+    COLLECTION_STATUS = "/collection/status" # New Doc
+    STATUS = "/collection/status" # Alias for backward compat if needed, or update usage
+    QUERY = "/query"
     RETRIEVE = "/retrieve"
     # FEEDBACK Removed
     DELETE_COLLECTION = "/delete/collection"
-    DELETE_FILE = "/delete/file" # New batch delete endpoint
+    DELETE_FILE = "/delete/file"
