@@ -12,7 +12,7 @@ from ...services.llm_service import LLMService
 from ...utils.database_utils import DatabaseService
 from ...utils.validation_utils import validate_job_exists
 from ...exceptions import WorkflowError
-from ...services.rag_service import get_rag_service
+from ...services.rag_client import rag_client, RagQueryRequest
 from ...config import get_settings
 import time
 
@@ -26,11 +26,11 @@ class WorkflowOrchestrator:
         self.llm_service = None
 
         try:
-            self.rag_service = get_rag_service()
+            self.rag_client = rag_client
             self.rag_enabled = True
         except Exception as e:
-            logger.warning("rag_service_initialization_failed", error=str(e))
-            self.rag_service = None
+            logger.warning("rag_client_initialization_failed", error=str(e))
+            self.rag_client = None
             self.rag_enabled = False
         self.question_generator = QuestionGeneratorAgent()
         
@@ -66,18 +66,20 @@ class WorkflowOrchestrator:
             if not collection_name:
                 raise ValueError("No collection name provided. RAG-based processing requires a collection.")
 
-            if not self.rag_service:
-                raise WorkflowError("RAG Service is not available but is required for processing.")
+            if not self.rag_client:
+                raise WorkflowError("RAG Client is not available but is required for processing.")
 
             # --- 2. Retrieve Context ---
             await self.job_manager.update_job_progress(job_id, 20.0, "Retrieving content from RAG...")
             try:
                 # Use collection name as topic query to retrieve relevant context
-                retrieve_response = await self.rag_service.retrieve_content(
-                    query=collection_name, 
-                    user_id=job.user_id, 
-                    top_k=50,
-                    include_graph_context=False
+                request = RagQueryRequest(
+                    query=collection_name,
+                    top_k=50
+                )
+                retrieve_response = await self.rag_client.retrieve_content(
+                    user_id=job.user_id,
+                    request=request
                 )
                 if retrieve_response and retrieve_response.success:
                      content_text = "\n\n".join([c.chunk_text for c in retrieve_response.results])

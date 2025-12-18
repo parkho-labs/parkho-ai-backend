@@ -1,43 +1,13 @@
 #!/bin/bash
 
-# GCP Cloud Run Deployment Script for AI Content Tutor Backend
-# Make sure you're logged in: gcloud auth login
-# Make sure project is set: gcloud config set project parkhoai-864b2
-
 set -e
 
-PROJECT_ID="parkhoai-864b2"
-SERVICE_NAME="ai-content-tutor"
-REGION="us-central1"
-
-echo "🚀 Starting deployment to GCP Cloud Run..."
-
-# Step 1: Enable required APIs
-echo "📡 Enabling required APIs..."
-gcloud services enable run.googleapis.com
-gcloud services enable cloudbuild.googleapis.com
-gcloud services enable secretmanager.googleapis.com
-
-# Step 2: Build and deploy to Cloud Run
-echo "🏗️ Building and deploying to Cloud Run..."
-gcloud builds submit --tag gcr.io/$PROJECT_ID/$SERVICE_NAME
+PROJECT_ID="nyayamind-dev"
+SERVICE_NAME="nyayamind-backend"
+REGION="asia-south2"
 
 echo "🚀 Deploying to Cloud Run..."
-gcloud run deploy $SERVICE_NAME \
-    --image gcr.io/$PROJECT_ID/$SERVICE_NAME \
-    --region $REGION \
-    --platform managed \
-    --allow-unauthenticated \
-    --memory 2Gi \
-    --cpu 1 \
-    --timeout 3600 \
-    --concurrency 10 \
-    --max-instances 5 \
-    --clear-env-vars \
-    --clear-cloudsql-instances \
-    --set-secrets="OPENAI_API_KEY=OPENAI_API_KEY:latest" \
-    --set-secrets="DATABASE_URL=DATABASE_URL:latest"
-
+gcloud config set project $PROJECT_ID
+gcloud builds submit --tag gcr.io/$PROJECT_ID/$SERVICE_NAME
+gcloud run deploy $SERVICE_NAME --image gcr.io/$PROJECT_ID/$SERVICE_NAME --region $REGION --platform managed --allow-unauthenticated --memory 2Gi --timeout 900
 echo "✅ Deployment complete!"
-echo "🌐 Your service URL:"
-gcloud run services describe $SERVICE_NAME --region=$REGION --format="value(status.url)"

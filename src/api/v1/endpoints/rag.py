@@ -1,103 +1,108 @@
 import structlog
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 
-from src.api.dependencies import get_current_user_conditional, get_rag_service, get_file_repository, get_collection_service
-from src.services.rag_service import RagService
+from src.api.dependencies import get_current_user_conditional, get_rag_client, get_file_repository, get_collection_service
+from src.services.rag_client import (
+    RagClient,
+    RagLinkRequest,
+    RagQueryRequest,
+    RagLinkResponse,
+    RagQueryResponse,
+    RagRetrieveResponse,
+    RagStatusResponse,
+    RagDeleteResponse
+)
 from src.services.collection_service import CollectionService
 from src.repositories.file_repository import FileRepository
 from src.models.user import User
 from src.api.v1.constants import RAGIndexingStatus
-from src.api.v1.schemas import (
-    BatchLinkRequest,
-    BatchLinkResponse,
-    StatusCheckRequest,
-    StatusCheckResponse,
-    QueryRequest,
-    QueryResponse,
-    RetrieveRequest,
-    RetrieveResponse,
-    DeleteFileRequest,
-    DeleteFileResponse,
-    DeleteCollectionRequest,
-    DeleteCollectionResponse
-)
+from pydantic import BaseModel
+from typing import Dict, Any, Optional
+
+# Simplified API request/response schemas
+class BatchLinkRequest(BaseModel):
+    items: List[RagLinkRequest]
+
+class StatusCheckRequest(BaseModel):
+    file_ids: List[str]
+
+class QueryRequest(BaseModel):
+    query: str
+    top_k: int = 5
+    include_sources: bool = True
+    filters: Optional[Dict[str, Any]] = None
+
+class RetrieveRequest(BaseModel):
+    query: str
+    top_k: int = 5
+    filters: Optional[Dict[str, Any]] = None
+
+class DeleteFileRequest(BaseModel):
+    file_ids: List[str]
+
+class DeleteCollectionRequest(BaseModel):
+    collection_id: str
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
 
-@router.post("/link-content", response_model=BatchLinkResponse, status_code=207)
+@router.post("/link-content", response_model=RagLinkResponse, status_code=207)
 async def batch_link_content(
     request: BatchLinkRequest,
     current_user: User = Depends(get_current_user_conditional),
-    rag_service: RagService = Depends(get_rag_service),
+    rag_client: RagClient = Depends(get_rag_client),
     file_repo: FileRepository = Depends(get_file_repository),
     collection_service: CollectionService = Depends(get_collection_service)
-) -> BatchLinkResponse:
+) -> RagLinkResponse:
     try:
-        grouped_files = {} # collection_id -> [file_ids]
-
-        # 1. Validate and Persist Metadata
+        # Validate request items and ensure UploadedFile exists for non-file types
         for item in request.items:
             if item.type == "file" and not item.gcs_url:
                 raise HTTPException(status_code=422, detail=f"Item {item.file_id}: 'file' type requires 'gcs_url'")
             if item.type in ["youtube", "web"] and not item.url:
                 raise HTTPException(status_code=422, detail=f"Item {item.file_id}: '{item.type}' type requires 'url'")
-
-            # Determine Content Type and Path
-            mapped_content_type = "FILE"
-            file_path = item.gcs_url
             
-            if item.type == "youtube":
-                mapped_content_type = "YOUTUBE"
-                file_path = item.url
-            elif item.type == "web":
-                mapped_content_type = "WEB"
-                file_path = item.url
-            elif item.type == "file":
-                 # For 'file', it might already exist if uploaded via /files
-                 # But if linked via GCS URL directly, we might need to ensure record exists
-                 mapped_content_type = "FILE"
+            # For YouTube and Web, create local UploadedFile record if it doesn't exist
+            if item.type in ["youtube", "web"]:
+                existing = file_repo.get(item.file_id)
+                if not existing:
+                    file_repo.create_file(
+                        file_id=item.file_id,
+                        filename=item.url if item.type == "web" else f"YouTube: {item.file_id}",
+                        file_path=item.url,
+                        file_size=0,
+                        content_type=item.type.upper(),
+                        indexing_status="INDEXING_PENDING"
+                    )
 
-            # Check if exists, else create
-            existing_file = file_repo.get(item.file_id)
-            if not existing_file:
-                # Create metadata record
-                # We don't have file size for external links, set to 0
-                file_repo.create_file(
-                    file_id=item.file_id,
-                    filename=item.url if item.url else (item.gcs_url.split('/')[-1] if item.gcs_url else item.file_id),
-                    file_path=file_path,
-                    file_size=0,
-                    content_type=mapped_content_type,
-                    file_type=None, # Explicitly None for non-files, or could derive from URL
-                    indexing_status=RAGIndexingStatus.INDEXING_PENDING
-                )
-            
-            # Group for Collection Linking
-            if item.collection_id:
-                if item.collection_id not in grouped_files:
-                    grouped_files[item.collection_id] = []
-                grouped_files[item.collection_id].append(item.file_id)
+        # Call RAG Engine directly
+        response = await rag_client.link_content(current_user.user_id, request.items)
 
-        # 2. Call RAG Service (The Source of Truth for Indexing)
-        items_dict = [item.model_dump() for item in request.items]
-        rag_response = await rag_service.batch_link_content(items_dict, current_user.user_id)
+        # Update indexing status in DB based on response
+        for result in response.results:
+            file_record = file_repo.get(result.file_id)
+            if file_record:
+                file_record.indexing_status = result.status
+        file_repo.session.commit()
 
-        # 3. Link to Collections in Postgres (if RAG didn't fail completely)
-        # We do this optimistically or if batch succcessful. 
-        # Even if RAG fails individual items, we might want to keep the link?
-        # Using RAG response to filter? No, rag_response returns results. 
-        # Let's link all requested.
+        # Link to collections in local DB (if collection_id specified)
+        grouped_files = {}
+        for item in request.items:
+            cid = item.collection_id or "default"
+            if cid not in grouped_files:
+                grouped_files[cid] = []
+            grouped_files[cid].append(item.file_id)
+
         for collection_id, file_ids in grouped_files.items():
             try:
                 await collection_service.link_files(current_user.user_id, collection_id, file_ids)
             except Exception as e:
-                logger.error("Failed to link files to collection in DB", collection_id=collection_id, error=str(e))
-                # Don't fail the whole request, as RAG might have succeeded
+                logger.warning("Failed to link files to collection in DB", collection_id=collection_id, error=str(e))
 
-        return rag_response
+        return response
 
     except HTTPException:
         raise
@@ -106,90 +111,79 @@ async def batch_link_content(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/collection/status", response_model=StatusCheckResponse)
+@router.post("/collection/status", response_model=RagStatusResponse)
 async def check_indexing_status(
     request: StatusCheckRequest,
     current_user: User = Depends(get_current_user_conditional),
-    rag_service: RagService = Depends(get_rag_service)
-) -> StatusCheckResponse:
+    rag_client: RagClient = Depends(get_rag_client)
+) -> RagStatusResponse:
     try:
-        return await rag_service.check_indexing_status(request.file_ids, current_user.user_id)
+        return await rag_client.check_indexing_status(current_user.user_id, request.file_ids)
     except Exception as e:
         logger.error("Failed to check status", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/query", response_model=QueryResponse)
+@router.post("/query", response_model=RagQueryResponse)
 async def query_content(
     request: QueryRequest,
     current_user: User = Depends(get_current_user_conditional),
-    rag_service: RagService = Depends(get_rag_service)
-) -> QueryResponse:
+    rag_client: RagClient = Depends(get_rag_client)
+) -> RagQueryResponse:
     try:
-        filters_dict = None
-        if request.filters:
-            filters_dict = request.filters.model_dump(exclude_none=True)
-
-        return await rag_service.query_content(
+        rag_request = RagQueryRequest(
             query=request.query,
-            user_id=current_user.user_id,
-            filters=filters_dict,
             top_k=request.top_k,
-            include_sources=request.include_sources
+            include_sources=request.include_sources,
+            filters=request.filters
         )
+        return await rag_client.query_content(current_user.user_id, rag_request)
     except Exception as e:
         logger.error("Failed to query content", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/retrieve", response_model=RetrieveResponse)
+@router.post("/retrieve", response_model=RagRetrieveResponse)
 async def retrieve_content(
     request: RetrieveRequest,
     current_user: User = Depends(get_current_user_conditional),
-    rag_service: RagService = Depends(get_rag_service)
-) -> RetrieveResponse:
+    rag_client: RagClient = Depends(get_rag_client)
+) -> RagRetrieveResponse:
     try:
-        filters_dict = None
-        if request.filters:
-            filters_dict = request.filters.model_dump(exclude_none=True)
-
-        return await rag_service.retrieve_content(
+        rag_request = RagQueryRequest(
             query=request.query,
-            user_id=current_user.user_id,
-            filters=filters_dict,
             top_k=request.top_k,
-            include_graph_context=request.include_graph_context
+            filters=request.filters
         )
-
+        return await rag_client.retrieve_content(current_user.user_id, rag_request)
     except Exception as e:
         logger.error("Failed to retrieve content", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/delete/file", response_model=DeleteFileResponse)
+@router.delete("/delete/file", response_model=RagDeleteResponse)
 async def delete_files(
     request: DeleteFileRequest,
     current_user: User = Depends(get_current_user_conditional),
-    rag_service: RagService = Depends(get_rag_service)
-) -> DeleteFileResponse:
+    rag_client: RagClient = Depends(get_rag_client)
+) -> RagDeleteResponse:
     if "undefined" in request.file_ids:
         raise HTTPException(status_code=400, detail="Invalid file_id: 'undefined' found in request.")
     try:
-        return await rag_service.delete_files(request.file_ids, current_user.user_id)
+        return await rag_client.delete_files(current_user.user_id, request.file_ids)
     except Exception as e:
         logger.error("Failed to delete files", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/delete/collection", response_model=DeleteCollectionResponse)
+@router.delete("/delete/collection", response_model=RagDeleteResponse)
 async def delete_collection_data(
     request: DeleteCollectionRequest,
     current_user: User = Depends(get_current_user_conditional),
-    rag_service: RagService = Depends(get_rag_service)
-) -> DeleteCollectionResponse:
+    rag_client: RagClient = Depends(get_rag_client)
+) -> RagDeleteResponse:
     try:
-        return await rag_service.delete_collection(request.collection_id, current_user.user_id)
-
+        return await rag_client.delete_collection(current_user.user_id, request.collection_id)
     except Exception as e:
         logger.error("Failed to delete collection data", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))

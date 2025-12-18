@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..models.user import User
-from ..services.rag_service import get_rag_service
+# RAG service import removed - register_user not part of documented API
 
 settings = get_settings()
 
@@ -72,11 +72,8 @@ async def get_or_create_user(db: Session, firebase_uid: str, email: str, full_na
         db.commit()
         db.refresh(user)
 
-        try:
-            rag_service = get_rag_service()
-            await rag_service.register_user(firebase_uid, email, full_name)
-        except:
-            pass
+        # RAG user registration removed - not part of documented RAG Engine API
+        # Users are identified by x-user-id header in RAG requests
 
         return user
     except Exception as e:

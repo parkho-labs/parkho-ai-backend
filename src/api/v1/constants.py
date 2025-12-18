@@ -47,3 +47,14 @@ class RAGEndpoint:
     # FEEDBACK Removed
     DELETE_COLLECTION = "/delete/collection"
     DELETE_FILE = "/delete/file"
+
+
+class StorageConfig:
+    GCS_DOMAIN = "storage.googleapis.com"
+    UPLOADS_DIR = "uploaded_files"
+    SYSTEM_UPLOADS_PREFIX = "uploads/system"
+
+
+class ErrorConstants:
+    UNDEFINED_ID = "undefined"
+    ANONYMOUS_USER = "anonymous-user"
