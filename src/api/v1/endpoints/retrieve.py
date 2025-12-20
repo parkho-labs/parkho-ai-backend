@@ -1,8 +1,8 @@
 """
 Legal Content Retrieval Endpoint
 
-Provides /retrieve endpoint for direct constitutional content retrieval.
-Matches the specification in BACKEND_API_INTEGRATION.md.
+Provides /legal/search-content endpoint for direct constitutional content retrieval.
+Business-focused frontend API that uses RagClient internally.
 """
 
 import structlog
@@ -18,7 +18,7 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
-@router.post("", response_model=LegalRetrieveResponse)
+@router.post("/search-content", response_model=LegalRetrieveResponse)
 async def retrieve_constitutional_content(
     request: LegalRetrieveRequest = Body(...),
     rag_client: RagClient = Depends(get_rag_client)
@@ -26,7 +26,7 @@ async def retrieve_constitutional_content(
     """
     Direct constitutional content retrieval for research.
 
-    Endpoint: POST /api/v1/retrieve
+    Endpoint: POST /api/v1/legal/search-content
 
     Required Headers:
         x-user-id: User identifier
@@ -57,17 +57,13 @@ async def retrieve_constitutional_content(
                 detail="At least one collection_id is required"
             )
 
-        # Build RAG retrieve request
-        from src.services.rag_client import RagQueryRequest
-        rag_request = RagQueryRequest(
-            query=request.query,
-            filters={"collection_ids": request.collection_ids},
-            top_k=request.top_k,
-            include_sources=True
+        # Use legal-specific RAG client method to call /law/retrieve
+        rag_response = await rag_client.legal_retrieve(
+            request.user_id,
+            request.query,
+            request.collection_ids,
+            request.top_k
         )
-
-        # Retrieve content from RAG engine
-        rag_response = await rag_client.retrieve_content(request.user_id, rag_request)
 
         if not rag_response.success:
             logger.warning("RAG retrieval failed", user_id=request.user_id, query=request.query)

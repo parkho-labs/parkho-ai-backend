@@ -1,8 +1,8 @@
 """
 Legal Question Generation Endpoint
 
-Provides /questions/generate endpoint for creating exam-style legal questions.
-Matches the specification in BACKEND_API_INTEGRATION.md.
+Provides /legal/generate-quiz endpoint for creating exam-style legal questions.
+Business-focused frontend API that uses RagQuestionGeneratorService internally.
 """
 
 import structlog
@@ -25,12 +25,12 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
-@router.post("/generate", response_model=LegalQuestionResponse)
+@router.post("/generate-quiz", response_model=LegalQuestionResponse)
 async def generate_legal_questions(request: LegalQuestionRequest) -> LegalQuestionResponse:
     """
     Generate exam-style questions for legal education.
 
-    Endpoint: POST /api/v1/questions/generate
+    Endpoint: POST /api/v1/legal/generate-quiz
 
     Request Body:
         questions: List of question specifications (type, difficulty, count, filters)
@@ -76,22 +76,17 @@ async def generate_legal_questions(request: LegalQuestionRequest) -> LegalQuesti
             }
             rag_questions.append(rag_question)
 
-        # Build RAG request
-        from src.api.v1.schemas import RagQuestionGenerationRequest
-        rag_request = RagQuestionGenerationRequest(
-            questions=rag_questions,
-            context={"subject": request.context.subject if request.context else "Constitutional Law"}
-        )
-
-        # Call RAG question generation service
-        rag_service = RagQuestionGeneratorService.get_instance()
+        # Use legal-specific RAG client method to call /law/questions
+        from src.api.dependencies import get_rag_client
+        rag_client = get_rag_client()
         generation_start = datetime.now()
 
-        rag_response = await rag_service.generate_questions(rag_request)
+        context = {"subject": request.context.subject if request.context else "Constitutional Law"}
+        rag_response_data = await rag_client.legal_questions("user123", rag_questions, context)
 
         generation_time = (datetime.now() - generation_start).total_seconds()
 
-        if not rag_response.success:
+        if not rag_response_data.get("success", False):
             return LegalQuestionResponse(
                 success=False,
                 total_generated=0,
@@ -103,8 +98,8 @@ async def generate_legal_questions(request: LegalQuestionRequest) -> LegalQuesti
                     content_selection_time=0.0,
                     generation_time=generation_time
                 ),
-                errors=[f"Question generation failed: {', '.join(rag_response.errors)}"],
-                warnings=rag_response.warnings
+                errors=[f"Question generation failed: {rag_response_data.get('error', 'Unknown error')}"],
+                warnings=rag_response_data.get("warnings", [])
             )
 
         # Transform RAG response to legal format
@@ -112,14 +107,15 @@ async def generate_legal_questions(request: LegalQuestionRequest) -> LegalQuesti
         type_counts = {}
         difficulty_counts = {}
 
-        for rag_question in rag_response.questions:
+        questions_data = rag_response_data.get("questions", [])
+        for question_data in questions_data:
             # Generate legal question metadata
             metadata = LegalQuestionMetadata(
                 question_id=str(uuid.uuid4()),
-                type=rag_question.metadata.type,
-                difficulty=rag_question.metadata.difficulty,
-                estimated_time=rag_question.metadata.estimated_time,
-                source_files=rag_question.metadata.source_files,
+                type=question_data.get("metadata", {}).get("type", "unknown"),
+                difficulty=question_data.get("metadata", {}).get("difficulty", "easy"),
+                estimated_time=question_data.get("metadata", {}).get("estimated_time", 3),
+                source_files=question_data.get("metadata", {}).get("source_files", []),
                 generated_at=datetime.now().isoformat()
             )
 
@@ -129,7 +125,7 @@ async def generate_legal_questions(request: LegalQuestionRequest) -> LegalQuesti
 
             legal_question = LegalQuestion(
                 metadata=metadata,
-                content=rag_question.content
+                content=question_data.get("content", {})
             )
             legal_questions.append(legal_question)
 
@@ -138,7 +134,7 @@ async def generate_legal_questions(request: LegalQuestionRequest) -> LegalQuesti
             total_requested=total_requested,
             by_type=type_counts,
             by_difficulty=difficulty_counts,
-            content_selection_time=rag_response.generation_stats.content_selection_time,
+            content_selection_time=rag_response_data.get("generation_stats", {}).get("content_selection_time", 0.0),
             generation_time=generation_time
         )
 
@@ -148,7 +144,7 @@ async def generate_legal_questions(request: LegalQuestionRequest) -> LegalQuesti
             questions=legal_questions,
             generation_stats=generation_stats,
             errors=[],
-            warnings=rag_response.warnings
+            warnings=rag_response_data.get("warnings", [])
         )
 
         logger.info(

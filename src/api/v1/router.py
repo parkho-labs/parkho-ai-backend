@@ -27,14 +27,14 @@ api_router.include_router(rag.router, prefix="/rag", tags=["rag"])
 api_router.include_router(rag_questions.router, prefix="/rag/questions", tags=["rag-questions"])
 
 # =============================================================================
-# LEGAL RAG ENGINE ROUTERS (as per BACKEND_API_INTEGRATION.md)
+# LEGAL FRONTEND API ROUTERS (Business-focused endpoints)
 # =============================================================================
 
-# Legal Assistant Chatbot - Mounts at /law prefix (e.g. /law/chat)
-api_router.include_router(law.router, prefix="/law", tags=["legal-assistant"])
+# Legal Assistant Chatbot - Mounts at /legal prefix (e.g. /legal/ask-question)
+api_router.include_router(law.router, prefix="/legal", tags=["legal-assistant"])
 
-# Legal Question Generation - Mounts at /questions prefix (e.g. /questions/generate)
-api_router.include_router(questions.router, prefix="/questions", tags=["legal-questions"])
+# Legal Question Generation - Mounts at /legal prefix (e.g. /legal/generate-quiz)
+api_router.include_router(questions.router, prefix="/legal", tags=["legal-questions"])
 
-# Legal Content Retrieval - Mounts at root for /retrieve endpoint
-api_router.include_router(retrieve.router, prefix="/retrieve", tags=["legal-retrieval"])
+# Legal Content Retrieval - Mounts at /legal prefix (e.g. /legal/search-content)
+api_router.include_router(retrieve.router, prefix="/legal", tags=["legal-retrieval"])
