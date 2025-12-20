@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 
-from .endpoints import auth, content, quiz, health, analytics, analytics_dashboard, files, collection, rag
+from .endpoints import auth, content, quiz, health, analytics, analytics_dashboard, files, collection, rag, rag_questions
+# Legal RAG Engine endpoints
+from .endpoints import law, questions, retrieve
 
 api_router = APIRouter()
 
@@ -20,3 +22,19 @@ api_router.include_router(files.router, prefix="/files", tags=["files"])
 
 # RAG Router - Mounts at /rag prefix for consistency (e.g. /rag/query, /rag/link-content)
 api_router.include_router(rag.router, prefix="/rag", tags=["rag"])
+
+# RAG Questions Router - Mounts at /rag/questions prefix for Neo4j question generation
+api_router.include_router(rag_questions.router, prefix="/rag/questions", tags=["rag-questions"])
+
+# =============================================================================
+# LEGAL RAG ENGINE ROUTERS (as per BACKEND_API_INTEGRATION.md)
+# =============================================================================
+
+# Legal Assistant Chatbot - Mounts at /law prefix (e.g. /law/chat)
+api_router.include_router(law.router, prefix="/law", tags=["legal-assistant"])
+
+# Legal Question Generation - Mounts at /questions prefix (e.g. /questions/generate)
+api_router.include_router(questions.router, prefix="/questions", tags=["legal-questions"])
+
+# Legal Content Retrieval - Mounts at root for /retrieve endpoint
+api_router.include_router(retrieve.router, prefix="/retrieve", tags=["legal-retrieval"])

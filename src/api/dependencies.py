@@ -1,7 +1,7 @@
 from typing import Optional
 import logging
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi import Depends, Request, HTTPException
+from fastapi import Depends, Request, HTTPException, Header
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
@@ -224,3 +224,52 @@ async def get_current_user_optional_conditional(
 def get_video_job_repository(db: Session = Depends(get_db)):
     # Temporary redirect to content job repository
     return ContentJobRepository(db)
+
+
+# =============================================================================
+# LEGAL ENDPOINT DEPENDENCIES (for x-user-id header support)
+# =============================================================================
+
+async def get_legal_user_id_required(
+    x_user_id: str = Header(..., description="User ID from x-user-id header")
+) -> str:
+    """
+    Extract required user ID from x-user-id header for legal endpoints.
+    Used by /law/chat, /questions/generate, /retrieve endpoints.
+    """
+    if not x_user_id or x_user_id.strip() == "":
+        raise HTTPException(
+            status_code=400,
+            detail="x-user-id header is required for legal endpoints"
+        )
+    return x_user_id
+
+
+async def get_legal_user_id_conditional(
+    request: Request,
+    db: Session = Depends(get_db),
+    x_user_id: Optional[str] = Header(None, description="User ID from x-user-id header"),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> str:
+    """
+    Extract user ID from x-user-id header with fallback to authenticated user.
+    Supports both header-based authentication (for legal endpoints) and
+    Firebase token authentication (for general endpoints).
+    """
+    # Priority 1: Use x-user-id header if provided
+    if x_user_id and x_user_id.strip():
+        return x_user_id
+
+    # Priority 2: Extract from authenticated user
+    try:
+        user = await get_current_user_conditional(request, db, credentials)
+        if user and user.user_id:
+            return user.user_id
+    except Exception as e:
+        logger.warning(f"Failed to get authenticated user: {e}")
+
+    # Priority 3: Fail with helpful error
+    raise HTTPException(
+        status_code=400,
+        detail="Authentication required: provide either 'x-user-id' header or valid Firebase token"
+    )
