@@ -448,3 +448,253 @@ class DeleteCollectionRequest(BaseModel):
 
 class DeleteCollectionResponse(BaseModel):
     message: str
+
+
+class QuestionFilter(BaseModel):
+    collection_ids: Optional[List[str]] = None
+    file_ids: Optional[List[str]] = None
+    entities: Optional[List[str]] = None
+    chunk_types: Optional[List[str]] = None
+    chapters: Optional[List[str]] = None
+    key_terms: Optional[List[str]] = None
+
+
+class QuestionSpec(BaseModel):
+    type: str
+    count: int
+    difficulty: str
+    filters: Optional[QuestionFilter] = None
+
+
+class QuestionContext(BaseModel):
+    exam_type: Optional[str] = None
+    subject: Optional[str] = None
+    avoid_duplicates: Optional[bool] = True
+    include_explanations: Optional[bool] = True
+    language: Optional[str] = "english"
+
+
+class RagQuestionGenerationRequest(BaseModel):
+    questions: List[QuestionSpec]
+    context: Optional[QuestionContext] = None
+
+
+class GeneratedQuestion(BaseModel):
+    id: str
+    type: str
+    question: str
+    options: Optional[List[str]] = None
+    correct_answer: Optional[str] = None
+    explanation: Optional[str] = None
+    difficulty: str
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class RagQuestionGenerationResponse(BaseModel):
+    questions: List[GeneratedQuestion]
+    total_generated: int
+    generation_time: Optional[float] = None
+
+
+class ContentStatsRequest(BaseModel):
+    collection_ids: Optional[List[str]] = None
+
+
+class ContentStatistics(BaseModel):
+    total_chunks: int
+    unique_files: int
+    unique_collections: int
+    avg_text_length: float
+    chunk_types: List[str]
+    sample_chapters: List[str]
+
+
+class ContentStatsResponse(BaseModel):
+    success: bool
+    statistics: ContentStatistics
+    message: str
+
+
+class SupportedQuestionType(BaseModel):
+    type: str
+    name: str
+    description: str
+    typical_time: str
+
+
+class DifficultyLevel(BaseModel):
+    level: str
+    name: str
+    description: str
+    characteristics: List[str]
+
+
+class SupportedTypesResponse(BaseModel):
+    question_types: List[SupportedQuestionType]
+    difficulty_levels: List[DifficultyLevel]
+    filters: List[str]
+
+
+class ContentValidationRequest(BaseModel):
+    questions: List[QuestionSpec]
+
+
+class ContentValidationResult(BaseModel):
+    question_type: str
+    difficulty: str
+    requested_count: int
+    available_count: int
+    can_fulfill: bool
+
+
+class ContentValidationResponse(BaseModel):
+    validation_results: List[ContentValidationResult]
+    overall_feasible: bool
+
+
+class HealthCheckResponse(BaseModel):
+    status: str
+    neo4j_connected: bool
+    total_chunks: int
+    unique_files: int
+    service_ready: bool
+    timestamp: str
+
+
+# =============================================================================
+# LEGAL RAG ENGINE SCHEMAS (for /law/chat, /questions/generate, /retrieve)
+# =============================================================================
+
+# Legal Question Types (as documented in BACKEND_API_INTEGRATION.md)
+class LegalQuestionType(str, Enum):
+    ASSERTION_REASONING = "assertion_reasoning"
+    MATCH_FOLLOWING = "match_following"
+    COMPREHENSION = "comprehension"
+
+
+class LegalDifficultyLevel(str, Enum):
+    EASY = "easy"
+    MODERATE = "moderate"
+    DIFFICULT = "difficult"
+
+
+# Law Chat Endpoint Schemas (/law/chat)
+class LawChatRequest(BaseModel):
+    question: str = Field(..., min_length=10, max_length=500, description="Legal question (10-500 chars)")
+
+
+class LawSource(BaseModel):
+    text: str = Field(..., description="First 200 chars of source")
+    article: str = Field(..., description="Article reference")
+
+
+class LawChatResponse(BaseModel):
+    answer: str
+    sources: List[LawSource]
+    total_chunks: int
+
+
+# Legal Question Generation Schemas (/questions/generate)
+class LegalQuestionSpec(BaseModel):
+    type: LegalQuestionType
+    difficulty: LegalDifficultyLevel
+    count: int = Field(..., ge=1, le=10, description="Number of questions (1-10)")
+    filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters like collection_ids")
+
+
+class LegalQuestionContext(BaseModel):
+    subject: Optional[str] = Field(default=None, description="Subject context")
+
+
+class LegalQuestionRequest(BaseModel):
+    questions: List[LegalQuestionSpec]
+    context: Optional[LegalQuestionContext] = None
+
+
+# Legal Question Content Structures (matches documentation)
+class AssertionReasoningQuestion(BaseModel):
+    question_text: str
+    assertion: str
+    reason: str
+    options: List[str]
+    correct_option: str
+    explanation: str
+    difficulty: str
+    source_chunks: List[str]
+
+
+class MatchFollowingQuestion(BaseModel):
+    question_text: str
+    list_I: List[str]
+    list_II: List[str]
+    correct_matches: Dict[str, str]
+    explanation: str
+    difficulty: str
+    source_chunks: List[str]
+
+
+class ComprehensionSubQuestion(BaseModel):
+    question_text: str
+    options: List[str]
+    correct_option: str
+    explanation: str
+
+
+class ComprehensionQuestion(BaseModel):
+    passage: str
+    questions: List[ComprehensionSubQuestion]
+    difficulty: str
+    source_chunks: List[str]
+
+
+class LegalQuestionMetadata(BaseModel):
+    question_id: str = Field(..., description="UUID")
+    type: str
+    difficulty: str
+    estimated_time: int = Field(..., description="Estimated time in minutes")
+    source_files: List[str]
+    generated_at: str = Field(..., description="ISO timestamp")
+
+
+class LegalQuestion(BaseModel):
+    metadata: LegalQuestionMetadata
+    content: Dict[str, Any] = Field(..., description="Question content based on type")
+
+
+class LegalQuestionStats(BaseModel):
+    total_requested: int
+    by_type: Dict[str, int]
+    by_difficulty: Dict[str, int]
+    content_selection_time: float = Field(..., description="Time in seconds")
+    generation_time: float = Field(..., description="Time in seconds")
+
+
+class LegalQuestionResponse(BaseModel):
+    success: bool
+    total_generated: int
+    questions: List[LegalQuestion]
+    generation_stats: LegalQuestionStats
+    errors: List[str] = Field(default=[])
+    warnings: List[str] = Field(default=[])
+
+
+# Legal Content Retrieval Schemas (/retrieve)
+class LegalRetrieveRequest(BaseModel):
+    query: str
+    user_id: str
+    collection_ids: List[str]
+    top_k: int = Field(default=10, le=20, description="Max 20 results")
+
+
+class LegalChunk(BaseModel):
+    chunk_id: str
+    chunk_text: str
+    relevance_score: float = Field(..., ge=0.0, le=1.0)
+    file_id: str
+    page_number: Optional[int] = None
+    concepts: List[str]
+
+
+class LegalRetrieveResponse(BaseModel):
+    success: bool
+    results: List[LegalChunk]

@@ -51,8 +51,7 @@ class Settings(BaseSettings):
             "http://localhost:3000",
             "http://localhost:3001",
             "*",
-            "https://parkho-ai-frontend-ku7bn6e62q-uc.a.run.app",
-            "https://parkho-ai-frontend-722723826302.us-central1.run.app",
+            "https://nyayamind-frontend-722723826302.asia-south2.run.app",
             "http://13.236.51.35:3000"
 
         ],
@@ -82,6 +81,7 @@ class Settings(BaseSettings):
 
     # RAG Engine Configuration
     rag_engine_url: str = Field(default="https://rag-engine-api-846780462763.us-central1.run.app/api/v1", description="RAG Engine API base URL")
+    rag_questions_timeout: float = Field(default=60.0, description="Timeout for RAG question generation requests in seconds")
 
     # Analytics Dashboard Configuration
     analytics_provider: str = Field(default="google_studio", description="Analytics dashboard provider")
