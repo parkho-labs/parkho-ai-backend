@@ -1,8 +1,8 @@
 """
 Legal Assistant API (Chatbot) Endpoint
 
-Provides /law/chat endpoint for interactive Q&A on constitutional law queries.
-Matches the specification in BACKEND_API_INTEGRATION.md.
+Provides /legal/ask-question endpoint for interactive Q&A on constitutional law queries.
+Business-focused frontend API that uses RagClient internally.
 """
 
 import structlog
@@ -18,7 +18,7 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
-@router.post("/chat", response_model=LawChatResponse)
+@router.post("/ask-question", response_model=LawChatResponse)
 async def legal_assistant_chat(
     request: LawChatRequest,
     user_id: str = Depends(get_legal_user_id_required),
@@ -27,7 +27,7 @@ async def legal_assistant_chat(
     """
     Interactive Q&A chatbot for constitutional law queries.
 
-    Endpoint: POST /api/v1/law/chat
+    Endpoint: POST /api/v1/legal/ask-question
 
     Required Headers:
         x-user-id: User identifier
@@ -43,23 +43,8 @@ async def legal_assistant_chat(
     try:
         logger.info("Processing legal chat request", user_id=user_id, question_length=len(request.question))
 
-        # Use RAG client to query legal documents
-        # Default to constitution-golden-source collection for legal queries
-        filters = {
-            "collection_ids": ["constitution-golden-source"]
-        }
-
-        # Build RAG query request
-        from src.services.rag_client import RagQueryRequest
-        rag_request = RagQueryRequest(
-            query=request.question,
-            filters=filters,
-            top_k=5,
-            include_sources=True
-        )
-
-        # Query the RAG engine
-        rag_response = await rag_client.query_content(user_id, rag_request)
+        # Use legal-specific RAG client method to call /law/chat
+        rag_response = await rag_client.legal_chat(user_id, request.question)
 
         if not rag_response.success:
             raise HTTPException(
