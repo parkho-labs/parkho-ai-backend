@@ -9,15 +9,16 @@ from ..repositories.file_repository import FileRepository
 from ..models.uploaded_file import UploadedFile
 from ..config import get_settings
 from ..api.v1.schemas import StandardAPIResponse
-from ..api.v1.constants import RAGIndexingStatus
+from ..api.v1.constants import RAGIndexingStatus, StorageConfig
 
 settings = get_settings()
 
 
 class FileStorageService:
-    def __init__(self, file_repo: FileRepository):
+    def __init__(self, file_repo: FileRepository, gcp_service: Optional['GCPService'] = None):
         self.file_repo = file_repo
-        self.storage_dir = Path(getattr(settings, 'file_storage_dir', './uploaded_files'))
+        self.gcp_service = gcp_service
+        self.storage_dir = Path(getattr(settings, 'file_storage_dir', f'./{StorageConfig.UPLOADS_DIR}'))
         self.storage_dir.mkdir(exist_ok=True)
 
         self.file_limits = {
@@ -59,23 +60,31 @@ class FileStorageService:
             if not file_id:
                 file_id = str(uuid.uuid4())
             file_ext = os.path.splitext(file.filename)[1].lower()
-            stored_filename = f"{file_id}{file_ext}"
+            stored_filename = f"{file_id}_{file.filename}"
             file_path = self.storage_dir / stored_filename
 
+            # 1. Store Locally
             with open(file_path, "wb") as stored_file:
                 shutil.copyfileobj(file.file, stored_file)
+            
+            # 2. Store in GCS if enabled
+            final_path = str(file_path)
+            if settings.use_cloud_storage and self.gcp_service:
+                blob_name = f"{StorageConfig.SYSTEM_UPLOADS_PREFIX}/{file_id}/{file.filename}"
+                file.file.seek(0)
+                if self.gcp_service.upload_file(blob_name, file.file, content_type=file.content_type):
+                    final_path = self.gcp_service.get_public_url(blob_name)
 
             self.file_repo.create_file(
                 file_id=file_id,
                 filename=file.filename,
-                file_path=str(file_path),
-                file_size=file_path.stat().st_size,
+                file_path=final_path,
+                file_size=os.path.getsize(file_path),
                 content_type="FILE",
                 file_type=file.content_type,
                 ttl_hours=ttl_hours,
                 indexing_status=indexing_status
             )
-
             return file_id
 
         except Exception as e:

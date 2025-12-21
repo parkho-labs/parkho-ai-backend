@@ -1,17 +1,17 @@
 from typing import List, Dict, Any
 from fastapi import HTTPException
 from src.repositories.collection_repository import CollectionRepository
-from src.services.rag_service import RagService
+from src.services.rag_client import RagClient, RagQueryRequest
 from src.models.collection import Collection
 import structlog
 
 logger = structlog.get_logger(__name__)
 
 class CollectionService:
-    def __init__(self, repository: CollectionRepository, rag_service: RagService):
+    def __init__(self, repository: CollectionRepository, rag_client: RagClient):
         self.repository = repository
-        # We need RAG service only for Querying, not for Management anymore!
-        self.rag_service = rag_service
+        # We need RAG client only for Querying, not for Management anymore!
+        self.rag_client = rag_client
 
     async def create_collection(self, user_id: str, name: str) -> Collection:
         return self.repository.create(user_id, name)
@@ -25,7 +25,7 @@ class CollectionService:
             raise HTTPException(status_code=404, detail="Collection not found or unauthorized")
 
         try:
-            await self.rag_service.delete_collection(collection_id, user_id)
+            await self.rag_client.delete_collection(user_id, collection_id)
         except Exception as e:
             logger.warning("Failed to delete collection data from RAG service, proceeding with local deletion", collection_id=collection_id, error=str(e))
 
@@ -80,6 +80,7 @@ class CollectionService:
         if not file_ids:
             return {"answer": "Collection is empty.", "chunks": []}
 
-        # Call RAG Service with file filter
-        result = await self.rag_service.query_content(query=query, user_id=user_id, filters={"file_ids": file_ids})
+        # Call RAG Client with file filter
+        request = RagQueryRequest(query=query, filters={"file_ids": file_ids})
+        result = await self.rag_client.query_content(user_id, request)
         return result.model_dump()

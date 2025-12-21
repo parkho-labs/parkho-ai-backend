@@ -29,9 +29,9 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = Field(default=None, description="Anthropic API key")
     google_api_key: Optional[str] = Field(default=None, description="Google API key for Gemini and Speech-to-Text")
 
-    firebase_service_account_path: str = Field(default="parkhoai-864b2-firebase-adminsdk-fbsvc-f3da414502.json", description="Firebase service account JSON file path")
-    firebase_project_id: str = Field(default="parkhoai-864b2", description="Firebase project ID")
-    firebase_web_client_id: str = Field(default="846780462763-41qfms7hjen9er8ak9j4n5cevc8pkoti.apps.googleusercontent.com", description="Firebase web client ID")
+    firebase_service_account_path: str = Field(default="nyayamind-dev-firebase-adminsdk-fbsvc-db8b836225.json", description="Firebase service account JSON file path")
+    firebase_project_id: str = Field(default="nyayamind-dev", description="Firebase project ID")
+    firebase_web_client_id: str = Field(default="722723826302:web:your-web-app-id", description="Firebase web client ID")
     
     max_video_length_minutes: int = Field(default=30, description="Maximum video length in minutes")
     max_concurrent_jobs: int = Field(default=5, description="Maximum concurrent processing jobs")
@@ -52,7 +52,7 @@ class Settings(BaseSettings):
             "http://localhost:3001",
             "*",
             "https://parkho-ai-frontend-ku7bn6e62q-uc.a.run.app",
-            "https://parkho-ai-frontend-846780462763.us-central1.run.app",
+            "https://parkho-ai-frontend-722723826302.us-central1.run.app",
             "http://13.236.51.35:3000"
 
         ],
@@ -75,8 +75,8 @@ class Settings(BaseSettings):
     analytics_retention_days: int = Field(default=365, description="Analytics data retention in days")
 
     # GCP Configuration
-    gcp_project_id: str = Field(default="parkhoai-864b2", description="GCP Project ID")
-    storage_bucket: str = Field(default="parkhoai-content-storage", description="GCS bucket for file storage")
+    gcp_project_id: str = Field(default="nyayamind-dev", description="GCP Project ID")
+    storage_bucket: str = Field(default="nyayamind-content-storage", description="GCS bucket for file storage")
     use_cloud_storage: bool = Field(default=False, description="Use Cloud Storage instead of local storage")
     use_secret_manager: bool = Field(default=False, description="Use Secret Manager for API keys")
 

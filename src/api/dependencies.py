@@ -16,8 +16,9 @@ from ..services.analytics_service import AnalyticsService
 from ..services.analytics_dashboard_service import get_analytics_dashboard_service, AnalyticsDashboardService
 from ..services.llm_service import LLMService
 from ..services.collection_service import CollectionService
-from ..services.rag_service import RagService
+from ..services.rag_client import rag_client, RagClient
 from ..services.gcp_service import GCPService
+from ..api.v1.constants import RAGIndexingStatus, StorageConfig, ErrorConstants
 from ..models.user import User
 from ..config import get_settings
 
@@ -42,7 +43,8 @@ def get_collection_repository(db: Session = Depends(get_db)) -> CollectionReposi
 
 def get_file_storage(db: Session = Depends(get_db)) -> FileStorageService:
     file_repo = FileRepository(db)
-    return FileStorageService(file_repo)
+    gcp_service = get_gcp_service()
+    return FileStorageService(file_repo, gcp_service)
 
 
 def get_analytics_repository(db: Session = Depends(get_db)) -> AnalyticsRepository:
@@ -72,15 +74,14 @@ def get_gcp_service() -> GCPService:
     settings = get_settings()
     return GCPService(settings)
 
-def get_rag_service() -> RagService:
-    from ..services.rag_service import get_rag_service as get_rag_service_factory
-    return get_rag_service_factory()
+def get_rag_client() -> RagClient:
+    return rag_client
 
 def get_collection_service(
     repo: CollectionRepository = Depends(get_collection_repository)
 ) -> CollectionService:
-    rag_service = get_rag_service()
-    return CollectionService(repo, rag_service)
+    rag_client = get_rag_client()
+    return CollectionService(repo, rag_client)
 
 
 async def get_current_user_required(
@@ -161,7 +162,7 @@ async def get_current_user_optional(
 
 async def get_or_create_anonymous_user(db: Session) -> User:
     """Create or return an anonymous user for when authentication is disabled"""
-    anonymous_user_id = "anonymous-user"
+    anonymous_user_id = ErrorConstants.ANONYMOUS_USER
 
     existing_user = db.query(User).filter(User.user_id == anonymous_user_id).first()
     if existing_user:

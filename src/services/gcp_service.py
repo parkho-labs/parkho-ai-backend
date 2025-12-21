@@ -122,3 +122,31 @@ class GCPService:
         except Exception as e:
             logger.error("Failed to delete file from GCS", error=str(e), blob_name=blob_name)
             return False
+
+    def upload_file(self, blob_name: str, file_obj, content_type: str) -> bool:
+        """Uploads a file object to GCS."""
+        if not self.client:
+            return False
+        try:
+            bucket = self.client.bucket(self.bucket_name)
+            blob = bucket.blob(blob_name)
+            blob.upload_from_file(file_obj, content_type=content_type)
+            logger.info("Uploaded file to GCS", blob_name=blob_name)
+            return True
+        except Exception as e:
+            logger.error("Failed to upload file to GCS", error=str(e), blob_name=blob_name)
+            return False
+
+    def upload_file_from_path(self, blob_name: str, local_path: str, content_type: str) -> bool:
+        """Uploads a file from a local path to GCS."""
+        if not self.client:
+            return False
+        try:
+            bucket = self.client.bucket(self.bucket_name)
+            blob = bucket.blob(blob_name)
+            blob.upload_from_filename(local_path, content_type=content_type)
+            logger.info("Uploaded file from path to GCS", blob_name=blob_name, local_path=local_path)
+            return True
+        except Exception as e:
+            logger.error("Failed to upload file from path to GCS", error=str(e), blob_name=blob_name)
+            return False

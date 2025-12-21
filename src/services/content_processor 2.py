@@ -6,7 +6,7 @@ from typing import Dict, Any, List
 
 from ..agents.content_workflow import ContentWorkflow
 from ..config import get_settings
-from ..services.rag_client import rag_client
+from ..services.rag_service import get_rag_service
 from ..core.database import SessionLocal
 from ..models.content_job import ContentJob
 
@@ -19,10 +19,10 @@ class ContentProcessorService:
         self.executor = ThreadPoolExecutor(max_workers=settings.max_concurrent_jobs)
         self.running_jobs = set()
         try:
-            self.rag_client = rag_client
+            self.rag_service = get_rag_service()
         except Exception as e:
-            logger.warning(f"RAG client initialization failed: {e}")
-            self.rag_client = None
+            logger.warning(f"RAG service initialization failed: {e}")
+            self.rag_service = None
 
     def process_content_background_sync(self, job_id: int):
         """Synchronous wrapper for async content processing that can be run in thread pool."""
