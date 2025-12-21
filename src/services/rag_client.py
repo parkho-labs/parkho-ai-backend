@@ -99,8 +99,9 @@ class RagClient:
         """Initialize RAG client with base URL and httpx client"""
         settings = get_settings()
         self.base_url = base_url or settings.rag_engine_url
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self.client = httpx.AsyncClient(timeout=120.0)  # Increased from 30s to 120s for question generation
         self.logger = logging.getLogger(__name__)
+        self.logger.info(f"🚀 RAG Client initialized with base_url: {self.base_url}")
 
     @classmethod
     def get_instance(cls) -> 'RagClient':
@@ -287,6 +288,139 @@ class RagClient:
     async def close(self):
         """Close the httpx client"""
         await self.client.aclose()
+
+    # =============================================================================
+    # LEGAL-SPECIFIC RAG ENGINE METHODS
+    # =============================================================================
+
+    async def legal_chat(self, user_id: str, question: str) -> RagQueryResponse:
+        """
+        Legal assistant chat via RAG engine.
+
+        Maps to: POST /law/chat
+        """
+        try:
+            payload = {"question": question}
+            url = f"{self.base_url}/law/chat"
+            
+            self.logger.info(f"🔍 RAG Engine Request - URL: {url}, User: {user_id}, Question length: {len(question)}")
+
+            response = await self.client.post(
+                url,
+                headers=self._get_headers(user_id),
+                json=payload
+            )
+            
+            self.logger.info(f"📥 RAG Engine Response - Status: {response.status_code}, URL: {url}")
+            
+            # Log raw response for debugging
+            raw_response = response.text
+            self.logger.info(f"📄 RAG Engine Raw Response: {raw_response[:500]}")  # First 500 chars
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            self.logger.info(f"📊 RAG Engine Data - Answer: '{data.get('answer', '')}', Answer length: {len(data.get('answer', ''))}, Sources: {len(data.get('sources', []))}")
+            self.logger.info(f"🔍 RAG Engine Sources Detail: {data.get('sources', [])[:2]}")  # First 2 sources
+
+            # Transform RAG response to our format
+            sources = []
+            if data.get("sources"):
+                for source in data["sources"]:
+                    sources.append(RagChunk(
+                        chunk_id=f"legal_{hash(source.get('text', ''))}",
+                        chunk_text=source.get("text", ""),
+                        relevance_score=1.0,  # Legal sources don't have scores
+                        file_id="legal_document",
+                        concepts=[source.get("article", "Constitutional Law")]
+                    ))
+
+            return RagQueryResponse(
+                success=True,
+                answer=data.get("answer", ""),
+                sources=sources
+            )
+
+        except httpx.HTTPError as e:
+            self.logger.error(f"❌ Legal chat HTTP error - URL: {self.base_url}/law/chat, Error: {e}, Status: {getattr(e.response, 'status_code', 'N/A')}")
+            raise ParkhoError(f"Failed to get legal chat response: {e}")
+        except Exception as e:
+            self.logger.error(f"❌ Legal chat unexpected error - URL: {self.base_url}/law/chat, Error: {e}", exc_info=True)
+            raise ParkhoError(f"Unexpected error in legal chat: {e}")
+
+    async def legal_retrieve(self, user_id: str, query: str, collection_ids: List[str], top_k: int = 10) -> RagRetrieveResponse:
+        """
+        Legal content retrieval via RAG engine.
+
+        Maps to: POST /law/retrieve
+        """
+        try:
+            payload = {
+                "query": query,
+                "user_id": user_id,
+                "collection_ids": collection_ids,
+                "top_k": top_k
+            }
+
+            response = await self.client.post(
+                f"{self.base_url}/law/retrieve",
+                headers=self._get_headers(user_id),
+                json=payload
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Transform RAG response to our format
+            chunks = []
+            if data.get("success") and data.get("results"):
+                for result in data["results"]:
+                    chunks.append(RagChunk(
+                        chunk_id=result.get("chunk_id", ""),
+                        chunk_text=result.get("chunk_text", ""),
+                        relevance_score=result.get("relevance_score", 0.0),
+                        file_id=result.get("file_id", ""),
+                        page_number=result.get("page_number"),
+                        concepts=result.get("concepts", [])
+                    ))
+
+            return RagRetrieveResponse(
+                success=data.get("success", False),
+                results=chunks
+            )
+
+        except httpx.HTTPError as e:
+            self.logger.error(f"Legal retrieve failed: {e}")
+            raise ParkhoError(f"Failed to retrieve legal content: {e}")
+        except Exception as e:
+            self.logger.error(f"Legal retrieve unexpected error: {e}")
+            raise ParkhoError(f"Unexpected error in legal retrieve: {e}")
+
+    async def legal_questions(self, user_id: str, questions_spec: List[Dict], context: Dict = None) -> Dict:
+        """
+        Legal question generation via RAG engine.
+
+        Maps to: POST /law/questions
+        """
+        try:
+            payload = {
+                "questions": questions_spec,
+                "context": context or {}
+            }
+
+            response = await self.client.post(
+                f"{self.base_url}/law/questions",
+                headers=self._get_headers(user_id),
+                json=payload
+            )
+            response.raise_for_status()
+            return response.json()
+
+        except httpx.HTTPError as e:
+            self.logger.error(f"Legal questions failed: {e}")
+            raise ParkhoError(f"Failed to generate legal questions: {e}")
+        except Exception as e:
+            self.logger.error(f"Legal questions unexpected error: {e}")
+            raise ParkhoError(f"Unexpected error in legal questions: {e}")
 
 
 # Global singleton instance
