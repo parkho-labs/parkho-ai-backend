@@ -101,6 +101,7 @@ class RagClient:
         self.base_url = base_url or settings.rag_engine_url
         self.client = httpx.AsyncClient(timeout=120.0)  # Increased from 30s to 120s for question generation
         self.logger = logging.getLogger(__name__)
+        self.logger.info(f"🚀 RAG Client initialized with base_url: {self.base_url}")
 
     @classmethod
     def get_instance(cls) -> 'RagClient':
@@ -300,14 +301,27 @@ class RagClient:
         """
         try:
             payload = {"question": question}
+            url = f"{self.base_url}/law/chat"
+            
+            self.logger.info(f"🔍 RAG Engine Request - URL: {url}, User: {user_id}, Question length: {len(question)}")
 
             response = await self.client.post(
-                f"{self.base_url}/law/chat",
+                url,
                 headers=self._get_headers(user_id),
                 json=payload
             )
+            
+            self.logger.info(f"📥 RAG Engine Response - Status: {response.status_code}, URL: {url}")
+            
+            # Log raw response for debugging
+            raw_response = response.text
+            self.logger.info(f"📄 RAG Engine Raw Response: {raw_response[:500]}")  # First 500 chars
+            
             response.raise_for_status()
             data = response.json()
+            
+            self.logger.info(f"📊 RAG Engine Data - Answer: '{data.get('answer', '')}', Answer length: {len(data.get('answer', ''))}, Sources: {len(data.get('sources', []))}")
+            self.logger.info(f"🔍 RAG Engine Sources Detail: {data.get('sources', [])[:2]}")  # First 2 sources
 
             # Transform RAG response to our format
             sources = []
@@ -328,10 +342,10 @@ class RagClient:
             )
 
         except httpx.HTTPError as e:
-            self.logger.error(f"Legal chat failed: {e}")
+            self.logger.error(f"❌ Legal chat HTTP error - URL: {self.base_url}/law/chat, Error: {e}, Status: {getattr(e.response, 'status_code', 'N/A')}")
             raise ParkhoError(f"Failed to get legal chat response: {e}")
         except Exception as e:
-            self.logger.error(f"Legal chat unexpected error: {e}")
+            self.logger.error(f"❌ Legal chat unexpected error - URL: {self.base_url}/law/chat, Error: {e}", exc_info=True)
             raise ParkhoError(f"Unexpected error in legal chat: {e}")
 
     async def legal_retrieve(self, user_id: str, query: str, collection_ids: List[str], top_k: int = 10) -> RagRetrieveResponse:
