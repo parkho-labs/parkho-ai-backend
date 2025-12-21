@@ -875,3 +875,38 @@ class PaperStatsResponse(BaseModel):
 class AvailableFiltersResponse(BaseModel):
     years: List[int]
     exam_names: List[str]
+
+
+# PDF Parsing Schemas (for admin/dev data ingestion)
+class ParsePDFRequest(BaseModel):
+    url: str = Field(..., description="URL of the PDF to parse")
+    title: Optional[str] = Field(None, description="Optional exam title")
+    year: Optional[int] = Field(None, description="Optional exam year")
+    exam_name: Optional[str] = Field(None, description="Optional exam name")
+    time_limit_minutes: Optional[int] = Field(180, description="Time limit in minutes")
+
+
+class ParsePDFResponse(BaseModel):
+    success: bool
+    parsed_data: Dict[str, Any] = Field(..., description="Parsed exam paper data")
+    questions_found: int
+    total_marks: float
+    message: str
+
+
+class ImportPaperRequest(BaseModel):
+    url: str = Field(..., description="URL of the PDF to parse and import")
+    title: Optional[str] = Field(None, description="Optional exam title")
+    year: Optional[int] = Field(None, description="Optional exam year")
+    exam_name: Optional[str] = Field(None, description="Optional exam name")
+    time_limit_minutes: Optional[int] = Field(180, description="Time limit in minutes")
+    activate: bool = Field(True, description="Whether to activate the paper immediately")
+
+
+class ImportPaperResponse(BaseModel):
+    success: bool
+    paper_id: int
+    title: str
+    questions_imported: int
+    total_marks: float
+    message: str

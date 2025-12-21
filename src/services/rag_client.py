@@ -403,6 +403,7 @@ class RagClient:
         """
         try:
             payload = {
+                "user_id": user_id,
                 "questions": questions_spec,
                 "context": context or {}
             }

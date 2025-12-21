@@ -12,11 +12,10 @@ openai>=1.0.0
 anthropic>=0.7.0
 google-generativeai>=0.3.0
 
-# REMOVED: Parsing dependencies (moved to RAG Engine)
-# yt-dlp>=2023.10.0
-# pymupdf4llm>=0.0.9
-# python-docx>=0.8.11
-# google-adk>=0.1.0
+# PDF Parsing (for PYQ system)
+pymupdf>=1.23.0
+pdfplumber>=0.10.0
+PyPDF2>=3.0.0
 
 # Data Processing
 pydantic>=2.5.0

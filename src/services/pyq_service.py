@@ -342,3 +342,149 @@ class PYQService:
             safe_questions.append(safe_q)
 
         return safe_questions
+
+    async def parse_pdf_from_url(
+        self,
+        url: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Parse PDF from URL and return structured exam paper data.
+        
+        Args:
+            url: URL of the PDF file
+            metadata: Optional metadata (title, year, exam_name, etc.)
+            
+        Returns:
+            Dictionary with parsed exam paper data
+            
+        Raises:
+            ParkhoError: If parsing fails
+        """
+        try:
+            from ..services.pdf_parser_service import get_pdf_parser_service
+            
+            logger.info("Parsing PDF from URL", url=url)
+            
+            pdf_parser = get_pdf_parser_service()
+            result = await pdf_parser.parse_pdf_from_url(url, metadata)
+            
+            logger.info(
+                "PDF parsing successful",
+                url=url,
+                questions=result.get("total_questions", 0)
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error("Failed to parse PDF", url=url, error=str(e), exc_info=e)
+            raise ParkhoError(f"Failed to parse PDF: {str(e)}")
+
+    async def import_paper_from_pdf(
+        self,
+        url: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        activate: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Parse PDF and import it as an exam paper into the database.
+        
+        Args:
+            url: URL of the PDF file
+            metadata: Optional metadata (title, year, exam_name, etc.)
+            activate: Whether to activate the paper immediately
+            
+        Returns:
+            Dictionary with imported paper information
+            
+        Raises:
+            ParkhoError: If import fails
+        """
+        try:
+            logger.info("Importing paper from PDF", url=url, activate=activate)
+            
+            # Step 1: Parse PDF
+            parsed_data = await self.parse_pdf_from_url(url, metadata)
+            
+            # Step 2: Validate parsed data
+            self.validate_parsed_paper(parsed_data)
+            
+            # Step 3: Create ExamPaper instance
+            import json
+            exam_paper = ExamPaper(
+                title=parsed_data["title"],
+                year=parsed_data["year"],
+                exam_name=parsed_data["exam_name"],
+                total_questions=parsed_data["total_questions"],
+                total_marks=parsed_data["total_marks"],
+                time_limit_minutes=parsed_data["time_limit_minutes"],
+                description=parsed_data.get("description"),
+                is_active=activate,
+                question_data=json.dumps(parsed_data["question_data"])  # Convert dict to JSON string
+            )
+            
+            # Step 4: Save to database
+            created_paper = self.exam_paper_repo.create(exam_paper)
+            
+            logger.info(
+                "Paper imported successfully",
+                paper_id=created_paper.id,
+                title=created_paper.title,
+                questions=created_paper.total_questions
+            )
+            
+            return {
+                "success": True,
+                "paper_id": created_paper.id,
+                "title": created_paper.title,
+                "questions_imported": created_paper.total_questions,
+                "total_marks": created_paper.total_marks,
+                "activated": created_paper.is_active
+            }
+            
+        except ParkhoError:
+            raise
+        except Exception as e:
+            logger.error("Failed to import paper from PDF", url=url, error=str(e), exc_info=e)
+            raise ParkhoError(f"Failed to import paper: {str(e)}")
+
+    def validate_parsed_paper(self, paper_data: Dict[str, Any]) -> None:
+        """
+        Validate parsed paper data structure.
+        
+        Args:
+            paper_data: Parsed exam paper data
+            
+        Raises:
+            ParkhoError: If validation fails
+        """
+        required_fields = ["title", "year", "exam_name", "total_questions", "total_marks", "question_data"]
+        
+        for field in required_fields:
+            if field not in paper_data:
+                raise ParkhoError(f"Missing required field: {field}")
+        
+        # Validate question_data structure
+        question_data = paper_data.get("question_data", {})
+        if not isinstance(question_data, dict):
+            raise ParkhoError("question_data must be a dictionary")
+        
+        questions = question_data.get("questions", [])
+        if not isinstance(questions, list):
+            raise ParkhoError("questions must be a list")
+        
+        if len(questions) == 0:
+            raise ParkhoError("No questions found in parsed data")
+        
+        # Validate each question has required fields
+        for i, question in enumerate(questions):
+            if not isinstance(question, dict):
+                raise ParkhoError(f"Question {i+1} is not a dictionary")
+            
+            required_q_fields = ["id", "type", "question_text", "options", "correct_answer"]
+            for field in required_q_fields:
+                if field not in question:
+                    raise ParkhoError(f"Question {i+1} missing required field: {field}")
+        
+        logger.debug("Paper data validation successful", questions_count=len(questions))
