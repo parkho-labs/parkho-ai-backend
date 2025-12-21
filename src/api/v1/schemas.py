@@ -698,3 +698,180 @@ class LegalChunk(BaseModel):
 class LegalRetrieveResponse(BaseModel):
     success: bool
     results: List[LegalChunk]
+
+
+# =============================================================================
+# PYQ (Previous Year Questions) SCHEMAS
+# =============================================================================
+
+# Base PYQ Schemas
+class ExamPaperSummary(BaseModel):
+    id: int
+    title: str
+    year: int
+    exam_name: str
+    total_questions: int
+    total_marks: float
+    time_limit_minutes: int
+    display_name: str
+    description: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class ExamPaperDetail(BaseModel):
+    id: int
+    title: str
+    year: int
+    exam_name: str
+    total_questions: int
+    total_marks: float
+    time_limit_minutes: int
+    display_name: str
+    description: Optional[str] = None
+    questions: Optional[List[Dict[str, Any]]] = None
+    created_at: Optional[str] = None
+
+
+class PaperListStats(BaseModel):
+    total_papers: int
+    available_years: List[int]
+    available_exams: List[str]
+    year_range: Dict[str, Optional[int]]
+
+
+class PaperListResponse(BaseModel):
+    papers: List[ExamPaperSummary]
+    summary: PaperListStats
+    pagination: Dict[str, int]
+
+
+# Exam Attempt Schemas
+class StartAttemptResponse(BaseModel):
+    attempt_id: int
+    paper_id: int
+    paper_title: str
+    exam_name: str
+    year: int
+    total_questions: int
+    total_marks: float
+    time_limit_minutes: int
+    started_at: Optional[str] = None
+    questions: List[Dict[str, Any]]
+
+
+class ExamAnswers(BaseModel):
+    answers: Dict[int, str] = Field(..., description="Mapping of question_id to selected_answer")
+
+
+class QuestionResult(BaseModel):
+    question_id: int
+    question_text: str
+    correct_answer: str
+    user_answer: Optional[str] = None
+    is_correct: bool
+    is_attempted: bool
+    marks: float
+
+
+class AttemptDetailedResults(BaseModel):
+    attempt_id: int
+    paper_id: int
+    score: Optional[float] = None
+    percentage: Optional[float] = None
+    total_marks: float
+    time_taken_seconds: Optional[int] = None
+    started_at: Optional[str] = None
+    submitted_at: Optional[str] = None
+    question_results: List[QuestionResult]
+
+
+class PaperInfo(BaseModel):
+    id: int
+    title: str
+    exam_name: str
+    year: int
+
+
+class SubmitAttemptResponse(BaseModel):
+    attempt_id: int
+    submitted: bool
+    score: Optional[float] = None
+    total_marks: float
+    percentage: Optional[float] = None
+    time_taken_seconds: Optional[int] = None
+    display_time: str
+    submitted_at: Optional[str] = None
+    paper_info: PaperInfo
+    detailed_results: AttemptDetailedResults
+
+
+class AttemptResultsResponse(BaseModel):
+    attempt_id: int
+    score: Optional[float] = None
+    total_marks: float
+    percentage: Optional[float] = None
+    time_taken_seconds: Optional[int] = None
+    display_time: str
+    started_at: Optional[str] = None
+    submitted_at: Optional[str] = None
+    paper_info: PaperInfo
+    detailed_results: AttemptDetailedResults
+
+
+# User History Schemas
+class AttemptSummary(BaseModel):
+    attempt_id: int
+    paper_id: int
+    paper_title: str
+    exam_name: str
+    year: Optional[int] = None
+    score: Optional[float] = None
+    total_marks: float
+    percentage: Optional[float] = None
+    time_taken_seconds: Optional[int] = None
+    display_time: str
+    is_completed: bool
+    started_at: Optional[str] = None
+    submitted_at: Optional[str] = None
+
+
+class UserPerformanceStats(BaseModel):
+    total_attempts: int
+    completed_attempts: int
+    completion_rate: float
+    average_score: float
+    average_percentage: float
+    best_score: float
+    best_percentage: float
+    average_time_seconds: int
+
+
+class UserHistoryResponse(BaseModel):
+    attempts: List[AttemptSummary]
+    performance_stats: UserPerformanceStats
+    pagination: Dict[str, int]
+
+
+class PaperPerformanceStats(BaseModel):
+    paper_id: int
+    total_attempts: int
+    completed_attempts: int
+    completion_rate: float
+    average_score: float
+    average_percentage: float
+    highest_score: float
+    lowest_score: float
+    score_std_deviation: float
+
+
+class PaperStatsResponse(BaseModel):
+    paper_id: int
+    paper_title: str
+    exam_name: str
+    year: int
+    statistics: PaperPerformanceStats
+
+
+class AvailableFiltersResponse(BaseModel):
+    years: List[int]
+    exam_names: List[str]

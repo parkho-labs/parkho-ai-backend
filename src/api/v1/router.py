@@ -3,6 +3,8 @@ from fastapi import APIRouter
 from .endpoints import auth, content, quiz, health, analytics, analytics_dashboard, files, collection, rag, rag_questions
 # Legal RAG Engine endpoints
 from .endpoints import law, questions, retrieve
+# PYQ endpoints
+from .endpoints import pyq
 
 api_router = APIRouter()
 
@@ -38,3 +40,10 @@ api_router.include_router(questions.router, prefix="/legal", tags=["legal-questi
 
 # Legal Content Retrieval - Mounts at /legal prefix (e.g. /legal/search-content)
 api_router.include_router(retrieve.router, prefix="/legal", tags=["legal-retrieval"])
+
+# =============================================================================
+# PYQ (Previous Year Questions) API ROUTER
+# =============================================================================
+
+# PYQ System - Mounts at /pyq prefix (e.g. /pyq/papers, /pyq/attempts)
+api_router.include_router(pyq.router, prefix="/pyq", tags=["pyq"])
