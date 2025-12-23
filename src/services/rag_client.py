@@ -402,10 +402,47 @@ class RagClient:
         Maps to: POST /law/questions
         """
         try:
+            # Transform questions_spec to match RAG API format
+            total_questions = sum(q["count"] for q in questions_spec)
+            question_data = []
+
+            # Map question types to RAG API format
+            type_mapping = {
+                "assertion_reasoning": "Assertion_reason",
+                "match_following": "Match the following",
+                "comprehension": "MCQ"  # Map comprehension to MCQ as fallback
+            }
+
+            for q in questions_spec:
+                question_data.append({
+                    "question_type": type_mapping.get(q["type"], q["type"]),
+                    "num_questions": q["count"]
+                })
+
+            # Determine scope based on filters or context
+            scope = ["constitution"]  # Default scope
+            if questions_spec and questions_spec[0].get("filters", {}).get("collection_ids"):
+                collection_ids = questions_spec[0]["filters"]["collection_ids"]
+                if "constitution-golden-source" in collection_ids:
+                    scope = ["constitution"]
+                elif any("bns" in cid.lower() for cid in collection_ids):
+                    scope = ["bns"]
+
+            # Map difficulty levels to RAG API format and use first question's difficulty as overall difficulty
+            difficulty_mapping = {
+                "easy": "easy",
+                "moderate": "medium",
+                "difficult": "hard"
+            }
+            raw_difficulty = questions_spec[0]["difficulty"] if questions_spec else "moderate"
+            difficulty = difficulty_mapping.get(raw_difficulty, "medium")
+
             payload = {
-                "user_id": user_id,
-                "questions": questions_spec,
-                "context": context or {}
+                "title": f"Quiz on {context.get('subject', 'Constitutional Law')}" if context else "Legal Quiz",
+                "scope": scope,
+                "num_questions": total_questions,
+                "difficulty": difficulty,
+                "question_data": question_data
             }
 
             response = await self.client.post(

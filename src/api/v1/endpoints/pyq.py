@@ -1,545 +1,554 @@
-"""
-Previous Year Questions (PYQ) API Endpoints
-
-Provides endpoints for exam paper management and user attempt tracking
-"""
-
 import structlog
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query
+import json
+import re
+from pathlib import Path
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Query, Path as PathParam, Depends
+from sqlalchemy.orm import Session
 
-from ...dependencies import get_db
-from ..schemas import (
-    PaperListResponse,
-    ExamPaperDetail,
-    StartAttemptResponse,
-    ExamAnswers,
-    SubmitAttemptResponse,
-    AttemptResultsResponse,
-    UserHistoryResponse,
-    PaperStatsResponse,
-    AvailableFiltersResponse
-)
-from ....services.pyq_service import PYQService
-from ....exceptions import ParkhoError
+from ....services.gcp_service import GCPService
+from ....config import get_settings
+from ....core.database import get_db
+from ..schemas import ExamAnswers, SubmitAttemptResponse, AttemptResultsResponse
 
 logger = structlog.get_logger(__name__)
-
 router = APIRouter()
 
+settings = get_settings()
+gcp_service = GCPService(settings)
 
-@router.get("/papers", response_model=PaperListResponse)
-async def get_exam_papers(
-    limit: int = Query(default=50, ge=1, le=100, description="Number of papers to return"),
-    offset: int = Query(default=0, ge=0, description="Number of papers to skip"),
-    db=Depends(get_db)
-) -> PaperListResponse:
+
+def get_paper_metadata(filename: str, exam_type: str):
+    year_match = re.search(r'20\d{2}', filename)
+    year = int(year_match.group()) if year_match else 2024
+
+    name = Path(filename).stem
+    title = name.replace('-', ' ').replace('_', ' ')
+    title = ' '.join(word.capitalize() for word in title.split())
+    title = title.replace('Ugc Net', 'UGC NET').replace('Paper Ii', 'Paper II').replace('Solved Paper', '').strip()
+
+    # Extract paper type (Paper I, Paper II, etc.)
+    paper_type = None
+    if 'paper ii' in title.lower() or 'paper-ii' in filename.lower():
+        paper_type = "Paper II"
+    elif 'paper i ' in title.lower() or 'paper-i' in filename.lower():
+        paper_type = "Paper I"
+
+    return {
+        "filename": filename, 
+        "title": title, 
+        "year": year, 
+        "exam_name": exam_type.replace('_', ' '),
+        "paper_type": paper_type
+    }
+
+
+def get_paper_from_gcs(exam_type: str, filename: str):
+    try:
+        blob_path = f"pyq/{exam_type}/{filename}"
+        if not gcp_service.check_file_exists(blob_path):
+            return None
+
+        with gcp_service.open_file_stream(blob_path) as f:
+            if f is None:
+                return None
+            questions = json.load(f)
+
+        metadata = get_paper_metadata(filename, exam_type)
+        return {"questions": questions, **metadata, "total_questions": len(questions)}
+    except:
+        return None
+
+
+def list_papers_from_gcs(exam_type: str = None):
+    try:
+        bucket = gcp_service.client.bucket(gcp_service.bucket_name)
+        prefix = f"pyq/{exam_type}/" if exam_type else "pyq/"
+        blobs = bucket.list_blobs(prefix=prefix)
+
+        papers = []
+        for blob in blobs:
+            if blob.name.endswith('/'):
+                continue
+
+            path_parts = blob.name.split('/')
+            if len(path_parts) >= 3:
+                blob_exam_type = path_parts[1]
+                blob_filename = path_parts[2]
+                
+                # Get full metadata
+                metadata = get_paper_metadata(blob_filename, blob_exam_type)
+                
+                # Try to get actual question count from the file
+                try:
+                    paper_data = get_paper_from_gcs(blob_exam_type, blob_filename)
+                    total_questions = len(paper_data.get("questions", [])) if paper_data else 0
+                except:
+                    total_questions = 100  # Default
+                
+                papers.append({
+                    **metadata, 
+                    "size": blob.size,
+                    "total_questions": total_questions,
+                    "total_marks": total_questions  # 1 mark per question
+                })
+
+        papers.sort(key=lambda x: (-(x.get('year', 0)), x.get('title', '')))
+        return papers
+    except:
+        return []
+
+
+@router.get("/")
+async def list_all_papers(
+    user_id: str = Query(None, description="Optional user ID to get attempt counts"),
+    db: Session = Depends(get_db)
+):
+    papers = list_papers_from_gcs()
+    
+    # Add attempt counts if user_id provided
+    if user_id:
+        from ....models.user_attempt import UserAttempt
+        for paper in papers:
+            # Count attempts for this paper by checking filename in metadata
+            attempts = db.query(UserAttempt).filter(
+                UserAttempt.user_identifier == user_id,
+                UserAttempt.answers.contains(f'"filename": "{paper["filename"]}"')
+            ).count()
+            paper["attempt_count"] = attempts
+    
+    return {"papers": papers, "total": len(papers)}
+
+
+@router.get("/ugcnet")
+async def list_ugcnet_papers(
+    user_id: str = Query(None, description="Optional user ID to get attempt counts"),
+    db: Session = Depends(get_db)
+):
+    papers = list_papers_from_gcs("UGC_NET")
+    
+    # Add attempt counts if user_id provided
+    if user_id:
+        from ....models.user_attempt import UserAttempt
+        for paper in papers:
+            attempts = db.query(UserAttempt).filter(
+                UserAttempt.user_identifier == user_id,
+                UserAttempt.answers.contains(f'"filename": "{paper["filename"]}"')
+            ).count()
+            paper["attempt_count"] = attempts
+    
+    return {"papers": papers, "total": len(papers)}
+
+
+@router.get("/mpset")
+async def list_mpset_papers(
+    user_id: str = Query(None, description="Optional user ID to get attempt counts"),
+    db: Session = Depends(get_db)
+):
+    papers = list_papers_from_gcs("MPSET")
+    
+    # Add attempt counts if user_id provided
+    if user_id:
+        from ....models.user_attempt import UserAttempt
+        for paper in papers:
+            attempts = db.query(UserAttempt).filter(
+                UserAttempt.user_identifier == user_id,
+                UserAttempt.answers.contains(f'"filename": "{paper["filename"]}"')
+            ).count()
+            paper["attempt_count"] = attempts
+    
+    return {"papers": papers, "total": len(papers)}
+
+
+@router.get("/stats")
+async def get_user_stats(
+    user_id: str = Query(..., description="User ID to get statistics for"),
+    db: Session = Depends(get_db)
+):
     """
-    Get all available exam papers with summary information.
-
-    Returns paginated list of exam papers along with summary statistics.
+    Get user's PYQ practice statistics
+    
+    Returns:
+    - papers_attempted: Total number of exam attempts
+    - completed: Number of submitted/completed attempts
+    - best_score: Highest percentage achieved
+    - average_score: Average percentage across all attempts
+    - day_streak: Consecutive days practiced
     """
-    try:
-        pyq_service = PYQService(db)
-        result = pyq_service.get_all_papers(limit=limit, offset=offset)
-
-        logger.info("Retrieved exam papers", count=len(result["papers"]), limit=limit, offset=offset)
-        return result
-
-    except ParkhoError as e:
-        logger.error("Failed to get exam papers", error=str(e))
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error("Unexpected error getting exam papers", error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail="Failed to retrieve exam papers")
-
-
-# =============================================================================
-# EXAM-SPECIFIC ROUTES (MPSET and UGC NET)
-# =============================================================================
-
-@router.get("/mpset/papers", response_model=PaperListResponse)
-async def get_mpset_papers(
-    limit: int = Query(default=50, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
-    db=Depends(get_db)
-) -> PaperListResponse:
-    """Get all MPSET exam papers"""
-    try:
-        pyq_service = PYQService(db)
-        all_papers = pyq_service.get_all_papers(limit=200, offset=0)  # Get all first
+    from ....models.user_attempt import UserAttempt
+    from datetime import datetime, timedelta
+    from sqlalchemy import func
+    
+    # Get all attempts for this user
+    all_attempts = db.query(UserAttempt).filter(
+        UserAttempt.user_identifier == user_id
+    ).all()
+    
+    # Calculate stats
+    papers_attempted = len(all_attempts)
+    completed = sum(1 for a in all_attempts if a.is_submitted)
+    
+    # Best and average scores
+    submitted_attempts = [a for a in all_attempts if a.is_submitted and a.percentage is not None]
+    best_score = max((a.percentage for a in submitted_attempts), default=0)
+    average_score = sum(a.percentage for a in submitted_attempts) / len(submitted_attempts) if submitted_attempts else 0
+    
+    # Day streak - count consecutive days with attempts
+    if all_attempts:
+        # Get unique days with attempts (sorted desc)
+        attempt_dates = sorted(set(
+            a.started_at.date() for a in all_attempts if a.started_at
+        ), reverse=True)
         
-        # Filter MPSET papers
-        mpset_papers = [p for p in all_papers["papers"] if p["exam_name"] == "MPSET"]
-        
-        # Apply pagination
-        paginated = mpset_papers[offset:offset+limit]
-        
-        result = {
-            "papers": paginated,
-            "summary": {
-                "total_papers": len(mpset_papers),
-                "available_years": sorted(list(set(p["year"] for p in mpset_papers)), reverse=True),
-                "available_exams": ["MPSET"],
-                "year_range": {
-                    "earliest": min(p["year"] for p in mpset_papers) if mpset_papers else None,
-                    "latest": max(p["year"] for p in mpset_papers) if mpset_papers else None
-                }
-            },
-            "pagination": {"limit": limit, "offset": offset, "total": len(mpset_papers)}
-        }
-        
-        logger.info("Retrieved MPSET papers", count=len(paginated))
-        return result
-        
-    except Exception as e:
-        logger.error("Failed to get MPSET papers", error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail="Failed to retrieve MPSET papers")
+        day_streak = 0
+        if attempt_dates:
+            current_date = datetime.now().date()
+            expected_date = current_date
+            
+            for attempt_date in attempt_dates:
+                if attempt_date == expected_date or attempt_date == expected_date - timedelta(days=1):
+                    day_streak += 1
+                    expected_date = attempt_date - timedelta(days=1)
+                else:
+                    break
+    else:
+        day_streak = 0
+    
+    return {
+        "papers_attempted": papers_attempted,
+        "completed": completed,
+        "best_score": int(round(best_score)) if best_score else 0,
+        "average_score": int(round(average_score)) if average_score else 0,
+        "day_streak": day_streak
+    }
 
 
-@router.get("/ugcnet/papers", response_model=PaperListResponse)
-async def get_ugcnet_papers(
-    limit: int = Query(default=50, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
-    db=Depends(get_db)
-) -> PaperListResponse:
-    """Get all UGC NET exam papers"""
-    try:
-        pyq_service = PYQService(db)
-        all_papers = pyq_service.get_all_papers(limit=200, offset=0)
-        
-        # Filter UGC NET papers
-        ugcnet_papers = [p for p in all_papers["papers"] if p["exam_name"] == "UGC NET"]
-        
-        # Apply pagination
-        paginated = ugcnet_papers[offset:offset+limit]
-        
-        result = {
-            "papers": paginated,
-            "summary": {
-                "total_papers": len(ugcnet_papers),
-                "available_years": sorted(list(set(p["year"] for p in ugcnet_papers)), reverse=True),
-                "available_exams": ["UGC NET"],
-                "year_range": {
-                    "earliest": min(p["year"] for p in ugcnet_papers) if ugcnet_papers else None,
-                    "latest": max(p["year"] for p in ugcnet_papers) if ugcnet_papers else None
-                }
-            },
-            "pagination": {"limit": limit, "offset": offset, "total": len(ugcnet_papers)}
-        }
-        
-        logger.info("Retrieved UGC NET papers", count=len(paginated))
-        return result
-        
-    except Exception as e:
-        logger.error("Failed to get UGC NET papers", error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail="Failed to retrieve UGC NET papers")
-
-
-@router.get("/mpset/papers/{paper_id}", response_model=ExamPaperDetail)
-async def get_mpset_paper(
-    paper_id: int,
-    include_questions: bool = Query(default=False),
-    db=Depends(get_db)
-) -> ExamPaperDetail:
-    """Get specific MPSET paper details"""
-    try:
-        pyq_service = PYQService(db)
-        result = pyq_service.get_paper_by_id(paper_id, include_questions=include_questions)
-        
-        if result["exam_name"] != "MPSET":
-            raise HTTPException(status_code=404, detail="Paper is not an MPSET paper")
-        
-        logger.info("Retrieved MPSET paper", paper_id=paper_id)
-        return result
-        
-    except HTTPException:
-        raise
-    except ParkhoError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error("Failed to get MPSET paper", paper_id=paper_id, error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail="Failed to retrieve MPSET paper")
-
-
-@router.get("/ugcnet/papers/{paper_id}", response_model=ExamPaperDetail)
-async def get_ugcnet_paper(
-    paper_id: int,
-    include_questions: bool = Query(default=False),
-    db=Depends(get_db)
-) -> ExamPaperDetail:
-    """Get specific UGC NET paper details"""
-    try:
-        pyq_service = PYQService(db)
-        result = pyq_service.get_paper_by_id(paper_id, include_questions=include_questions)
-        
-        if result["exam_name"] != "UGC NET":
-            raise HTTPException(status_code=404, detail="Paper is not a UGC NET paper")
-        
-        logger.info("Retrieved UGC NET paper", paper_id=paper_id)
-        return result
-        
-    except HTTPException:
-        raise
-    except ParkhoError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error("Failed to get UGC NET paper", paper_id=paper_id, error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail="Failed to retrieve UGC NET paper")
-
-
-
-@router.get("/papers/{paper_id}", response_model=ExamPaperDetail)
-async def get_exam_paper(
-    paper_id: int,
-    include_questions: bool = Query(default=False, description="Include questions in response"),
-    db=Depends(get_db)
-) -> ExamPaperDetail:
-    """
-    Get specific exam paper details.
-
-    Optionally include questions (without correct answers for security).
-    """
-    try:
-        pyq_service = PYQService(db)
-        result = pyq_service.get_paper_by_id(paper_id, include_questions=include_questions)
-
-        logger.info("Retrieved exam paper", paper_id=paper_id, include_questions=include_questions)
-        return result
-
-    except ParkhoError as e:
-        logger.error("Failed to get exam paper", paper_id=paper_id, error=str(e))
-        raise HTTPException(status_code=404 if "not found" in str(e).lower() else 400, detail=str(e))
-    except Exception as e:
-        logger.error("Unexpected error getting exam paper", paper_id=paper_id, error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail="Failed to retrieve exam paper")
-
-
-@router.post("/papers/{paper_id}/start", response_model=StartAttemptResponse)
+@router.post("/papers/{exam_type}/{filename}/start")
 async def start_exam_attempt(
-    paper_id: int,
-    user_id: Optional[str] = Query(default=None, description="Optional user identifier"),
-    db=Depends(get_db)
-) -> StartAttemptResponse:
+    exam_type: str = PathParam(..., description="Exam type (UGC_NET, MPSET)"),
+    filename: str = PathParam(..., description="Paper filename"),
+    user_id: str = Query("anonymous", description="User identifier"),
+    db: Session = Depends(get_db)
+):
     """
-    Start a new exam attempt.
-
-    Creates a new attempt record and returns questions without correct answers.
+    Start a new exam attempt for a GCS paper
+    
+    Creates an attempt record in the database and returns the attempt_id
+    with questions (without answers)
+    
+    **Returns:**
+    - `attempt_id`: Use this ID to submit answers later
+    - `questions`: All questions without correct answers
     """
     try:
-        pyq_service = PYQService(db)
-        result = pyq_service.start_exam_attempt(paper_id, user_identifier=user_id)
-
-        logger.info("Started exam attempt", paper_id=paper_id, attempt_id=result["attempt_id"], user_id=user_id)
-        return result
-
-    except ParkhoError as e:
-        logger.error("Failed to start exam attempt", paper_id=paper_id, user_id=user_id, error=str(e))
-        raise HTTPException(status_code=404 if "not found" in str(e).lower() else 400, detail=str(e))
+        # Get paper from GCS
+        paper = get_paper_from_gcs(exam_type, filename)
+        if not paper:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        
+        # Remove correct answers from questions
+        questions = paper["questions"]
+        if isinstance(questions, list):
+            safe_questions = [{k: v for k, v in q.items() if k != "correct_answer"} for q in questions]
+        else:
+            safe_questions = []
+        
+        # Create attempt record in database (storing exam_type + filename as reference)
+        from ....models.user_attempt import UserAttempt
+        from datetime import datetime, timezone
+        
+        attempt = UserAttempt(
+            paper_id=None,  # No paper_id since we're using GCS
+            user_identifier=user_id,
+            total_marks=paper.get("total_questions", len(questions)),
+            started_at=datetime.now(timezone.utc)
+        )
+        db.add(attempt)
+        db.commit()
+        db.refresh(attempt)
+        
+        # Store paper reference in attempt metadata
+        attempt.answers = json.dumps({
+            "exam_type": exam_type,
+            "filename": filename,
+            "paper_title": paper.get("title", ""),
+            "started_questions": safe_questions
+        })
+        db.commit()
+        
+        logger.info("Started exam attempt from GCS", 
+                   attempt_id=attempt.id,
+                   exam_type=exam_type,
+                   filename=filename,
+                   user=user_id)
+        
+        return {
+            "attempt_id": attempt.id,
+            "exam_type": exam_type,
+            "filename": filename,
+            "paper_title": paper.get("title", ""),
+            "paper_type": paper.get("paper_type"),
+            "exam_name": paper.get("exam_name", exam_type),
+            "year": paper.get("year", 2024),
+            "total_questions": len(questions),
+            "total_marks": paper.get("total_questions", len(questions)),
+            "time_limit_minutes": 180,
+            "started_at": attempt.started_at.isoformat() if attempt.started_at else None,
+            "questions": safe_questions
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error("Unexpected error starting exam attempt", paper_id=paper_id, user_id=user_id, error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail="Failed to start exam attempt")
+        logger.error("Start exam failed", 
+                    exam_type=exam_type,
+                    filename=filename,
+                    user=user_id,
+                    error=str(e), 
+                    exc_info=e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/attempts/{attempt_id}/submit", response_model=SubmitAttemptResponse)
+@router.get("/{exam_type}/{filename}")
+async def get_paper(
+    exam_type: str = PathParam(...),
+    filename: str = PathParam(...),
+    answers: bool = Query(False)
+):
+    paper = get_paper_from_gcs(exam_type, filename)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    questions = paper["questions"]
+    if not answers and isinstance(questions, list):
+        questions = [{k: v for k, v in q.items() if k != "correct_answer"} for q in questions]
+        paper["questions"] = questions
+
+    return paper
+
+
+@router.post("/attempts/{attempt_id}/submit")
 async def submit_exam_attempt(
-    attempt_id: int,
-    answers: ExamAnswers,
-    db=Depends(get_db)
-) -> SubmitAttemptResponse:
+    attempt_id: int = PathParam(..., description="Exam attempt ID"),
+    answers: ExamAnswers = None,
+    db: Session = Depends(get_db)
+):
     """
-    Submit exam answers and get results.
-
-    Calculates score and provides detailed results with correct answers.
+    Submit exam answers and get results with score
+    
+    **Request Body:**
+    ```json
+    {
+      "answers": {
+        "36": "4",
+        "91": "1",
+        "95": "3"
+      }
+    }
+    ```
+    
+    Note: Question IDs and answers are strings
     """
     try:
-        pyq_service = PYQService(db)
-        result = pyq_service.submit_exam_attempt(attempt_id, answers.answers)
-
-        logger.info(
-            "Submitted exam attempt",
-            attempt_id=attempt_id,
-            score=result["score"],
-            percentage=result["percentage"],
-            total_answers=len(answers.answers)
-        )
-        return result
-
-    except ParkhoError as e:
-        logger.error("Failed to submit exam attempt", attempt_id=attempt_id, error=str(e))
-        raise HTTPException(
-            status_code=404 if "not found" in str(e).lower() else 400,
-            detail=str(e)
-        )
+        from ....models.user_attempt import UserAttempt
+        
+        # Get attempt from database
+        attempt = db.query(UserAttempt).filter(UserAttempt.id == attempt_id).first()
+        if not attempt:
+            raise HTTPException(status_code=404, detail=f"Exam attempt with ID {attempt_id} not found")
+        
+        if attempt.is_submitted:
+            raise HTTPException(status_code=400, detail="This attempt has already been submitted")
+        
+        # Get paper info from attempt metadata
+        attempt_data = json.loads(attempt.answers) if attempt.answers else {}
+        exam_type = attempt_data.get("exam_type")
+        filename = attempt_data.get("filename")
+        
+        if not exam_type or not filename:
+            raise HTTPException(status_code=400, detail="Invalid attempt: missing paper reference")
+        
+        # Fetch paper from GCS to get correct answers
+        paper = get_paper_from_gcs(exam_type, filename)
+        if not paper:
+            raise HTTPException(status_code=404, detail="Paper not found in GCS")
+        
+        # Build correct answers dict (string keys) and normalize to letter format
+        questions = paper["questions"]
+        correct_answers = {}
+        
+        # Helper function to normalize answers
+        def normalize_answer(ans):
+            """Convert both '1'/'A' formats to unified format"""
+            if not ans:
+                return None
+            ans = str(ans).strip().upper()
+            # Map numbers to letters: 1→A, 2→B, 3→C, 4→D
+            number_to_letter = {"1": "A", "2": "B", "3": "C", "4": "D"}
+            return number_to_letter.get(ans, ans)
+        
+        for q in questions:
+            q_id = str(q.get("id"))  # Convert to string
+            correct_ans = q.get("correct_answer")
+            if q_id and correct_ans:
+                correct_answers[q_id] = normalize_answer(correct_ans)
+        
+        # Normalize user answers to letters too
+        normalized_user_answers = {
+            q_id: normalize_answer(ans) 
+            for q_id, ans in answers.answers.items()
+        }
+        
+        # Submit attempt with normalized answers
+        # Don't use set_user_answers() as it overwrites metadata
+        updated_data = attempt_data.copy()  # Preserve exam_type, filename, etc.
+        updated_data["submitted_answers"] = normalized_user_answers
+        updated_data["total_attempted"] = len(normalized_user_answers)
+        attempt.answers = json.dumps(updated_data)
+        
+        score_data = attempt.calculate_score(correct_answers)
+        
+        # Update attempt
+        attempt.score = score_data["score"]
+        attempt.percentage = score_data["percentage"]
+        attempt.is_completed = True
+        attempt.is_submitted = True
+        from datetime import datetime, timezone
+        attempt.submitted_at = datetime.now(timezone.utc)
+        
+        if attempt.started_at:
+            time_diff = datetime.now(timezone.utc) - attempt.started_at
+            attempt.time_taken_seconds = int(time_diff.total_seconds())
+        
+        db.commit()
+        db.refresh(attempt)
+        
+        # Normalize correct answers in questions for detailed results display
+        normalized_questions = []
+        for q in questions:
+            q_copy = q.copy()
+            q_copy["correct_answer"] = normalize_answer(q.get("correct_answer"))
+            normalized_questions.append(q_copy)
+        
+        # Get detailed results with normalized questions
+        detailed_results = attempt.get_detailed_results(normalized_questions)
+        
+        logger.info("Exam submitted successfully", 
+                   attempt_id=attempt_id,
+                   score=attempt.score)
+        
+        return {
+            "attempt_id": attempt_id,
+            "submitted": True,
+            "score": attempt.score,
+            "total_marks": attempt.total_marks,
+            "percentage": attempt.percentage,
+            "time_taken_seconds": attempt.time_taken_seconds,
+            "display_time": attempt.display_time_taken,
+            "submitted_at": attempt.submitted_at.isoformat() if attempt.submitted_at else None,
+            "paper_info": {
+                "exam_type": exam_type,
+                "filename": filename,
+                "title": paper.get("title", ""),
+                "exam_name": paper.get("exam_name", exam_type),
+                "year": paper.get("year", 2024)
+            },
+            "detailed_results": detailed_results
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error("Unexpected error submitting exam attempt", attempt_id=attempt_id, error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail="Failed to submit exam attempt")
+        logger.error("Submit exam failed", 
+                    attempt_id=attempt_id, 
+                    error=str(e), 
+                    exc_info=e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/attempts/{attempt_id}/results", response_model=AttemptResultsResponse)
+@router.get("/attempts/{attempt_id}/results")
 async def get_attempt_results(
-    attempt_id: int,
-    db=Depends(get_db)
-) -> AttemptResultsResponse:
+    attempt_id: int = PathParam(..., description="Exam attempt ID"),
+    db: Session = Depends(get_db)
+):
     """
-    Get detailed results for a completed attempt.
-
-    Returns score breakdown and question-wise analysis.
-    """
-    try:
-        pyq_service = PYQService(db)
-        result = pyq_service.get_attempt_results(attempt_id)
-
-        logger.info("Retrieved attempt results", attempt_id=attempt_id, score=result["score"])
-        return result
-
-    except ParkhoError as e:
-        logger.error("Failed to get attempt results", attempt_id=attempt_id, error=str(e))
-        raise HTTPException(
-            status_code=404 if "not found" in str(e).lower() else 400,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error("Unexpected error getting attempt results", attempt_id=attempt_id, error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail="Failed to retrieve attempt results")
-
-
-@router.get("/history", response_model=UserHistoryResponse)
-async def get_user_attempt_history(
-    user_id: str = Query(..., description="User identifier"),
-    limit: int = Query(default=20, ge=1, le=100, description="Number of attempts to return"),
-    offset: int = Query(default=0, ge=0, description="Number of attempts to skip"),
-    db=Depends(get_db)
-) -> UserHistoryResponse:
-    """
-    Get user's exam attempt history with performance statistics.
-
-    Returns paginated list of attempts and overall performance metrics.
-    """
-    try:
-        pyq_service = PYQService(db)
-        result = pyq_service.get_user_attempt_history(user_id, limit=limit, offset=offset)
-
-        logger.info("Retrieved user history", user_id=user_id, attempts_count=len(result["attempts"]))
-        return result
-
-    except ParkhoError as e:
-        logger.error("Failed to get user history", user_id=user_id, error=str(e))
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error("Unexpected error getting user history", user_id=user_id, error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail="Failed to retrieve user history")
-
-
-@router.get("/papers/{paper_id}/stats", response_model=PaperStatsResponse)
-async def get_paper_performance_stats(
-    paper_id: int,
-    db=Depends(get_db)
-) -> PaperStatsResponse:
-    """
-    Get performance statistics for a specific exam paper.
-
-    Returns aggregate statistics across all attempts for this paper.
-    """
-    try:
-        pyq_service = PYQService(db)
-        result = pyq_service.get_paper_performance_stats(paper_id)
-
-        logger.info("Retrieved paper stats", paper_id=paper_id, total_attempts=result["statistics"]["total_attempts"])
-        return result
-
-    except ParkhoError as e:
-        logger.error("Failed to get paper stats", paper_id=paper_id, error=str(e))
-        raise HTTPException(
-            status_code=404 if "not found" in str(e).lower() else 400,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error("Unexpected error getting paper stats", paper_id=paper_id, error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail="Failed to retrieve paper statistics")
-
-
-@router.get("/search")
-async def search_papers(
-    q: str = Query(..., min_length=1, description="Search term"),
-    db=Depends(get_db)
-) -> List[dict]:
-    """
-    Search exam papers by title or exam name.
-
-    Returns matching papers based on search term.
-    """
-    try:
-        pyq_service = PYQService(db)
-        result = pyq_service.search_papers(q)
-
-        logger.info("Searched papers", search_term=q, results_count=len(result))
-        return result
-
-    except ParkhoError as e:
-        logger.error("Failed to search papers", search_term=q, error=str(e))
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error("Unexpected error searching papers", search_term=q, error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail="Failed to search papers")
-
-
-@router.get("/filters", response_model=AvailableFiltersResponse)
-async def get_available_filters(
-    db=Depends(get_db)
-) -> AvailableFiltersResponse:
-    """
-    Get available filter options for papers.
-
-    Returns unique years and exam names for filtering.
-    """
-    try:
-        pyq_service = PYQService(db)
-        result = pyq_service.get_available_filters()
-
-        logger.info("Retrieved filter options", years_count=len(result["years"]), exams_count=len(result["exam_names"]))
-        return result
-
-    except ParkhoError as e:
-        logger.error("Failed to get filter options", error=str(e))
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error("Unexpected error getting filter options", error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail="Failed to retrieve filter options")
-
-
-# =============================================================================
-# PDF PARSING ENDPOINTS (Admin/Dev Data Ingestion)
-# =============================================================================
-
-@router.post("/parse-pdf", response_model=dict)
-async def parse_pdf(
-    request: dict,
-    db=Depends(get_db)
-) -> dict:
-    """
-    Parse PDF from URL and return structured exam paper data (preview only).
+    Get detailed results for a completed exam attempt
     
-    This endpoint is for admin/dev use to preview parsed questions before importing.
-    Does NOT save to database.
-    
-    Request body:
-        - url: URL of the PDF file
-        - title: Optional exam title
-        - year: Optional exam year
-        - exam_name: Optional exam name
-        - time_limit_minutes: Optional time limit (default: 180)
+    Returns score, percentage, time taken, and question-by-question breakdown
     """
     try:
-        from ..schemas import ParsePDFRequest, ParsePDFResponse
+        from ....models.user_attempt import UserAttempt
         
-        # Validate request
-        parse_request = ParsePDFRequest(**request)
+        # Get attempt from database
+        attempt = db.query(UserAttempt).filter(UserAttempt.id == attempt_id).first()
+        if not attempt:
+            raise HTTPException(status_code=404, detail=f"Exam attempt with ID {attempt_id} not found")
         
-        pyq_service = PYQService(db)
+        if not attempt.is_submitted:
+            raise HTTPException(status_code=400, detail="This attempt has not been submitted yet")
         
-        # Build metadata
-        metadata = {}
-        if parse_request.title:
-            metadata["title"] = parse_request.title
-        if parse_request.year:
-            metadata["year"] = parse_request.year
-        if parse_request.exam_name:
-            metadata["exam_name"] = parse_request.exam_name
-        if parse_request.time_limit_minutes:
-            metadata["time_limit_minutes"] = parse_request.time_limit_minutes
+        # Get paper info from attempt metadata
+        attempt_data = json.loads(attempt.answers) if attempt.answers else {}
+        exam_type = attempt_data.get("exam_type")
+        filename = attempt_data.get("filename")
         
-        # Parse PDF
-        parsed_data = await pyq_service.parse_pdf_from_url(
-            parse_request.url,
-            metadata=metadata if metadata else None
-        )
+        if not exam_type or not filename:
+            raise HTTPException(status_code=400, detail="Invalid attempt: missing paper reference")
         
-        logger.info(
-            "PDF parsed successfully (preview)",
-            url=parse_request.url,
-            questions=parsed_data.get("total_questions", 0)
-        )
+        # Fetch paper from GCS to get questions
+        paper = get_paper_from_gcs(exam_type, filename)
+        if not paper:
+            raise HTTPException(status_code=404, detail="Paper not found in GCS")
+        
+        questions = paper["questions"]
+        
+        # Normalize answers helper (same as submit)
+        def normalize_answer(ans):
+            """Convert both '1'/'A' formats to unified format"""
+            if not ans:
+                return None
+            ans = str(ans).strip().upper()
+            number_to_letter = {"1": "A", "2": "B", "3": "C", "4": "D"}
+            return number_to_letter.get(ans, ans)
+        
+        # Normalize correct answers in questions for display
+        normalized_questions = []
+        for q in questions:
+            q_copy = q.copy()
+            q_copy["correct_answer"] = normalize_answer(q.get("correct_answer"))
+            normalized_questions.append(q_copy)
+        
+        # Get detailed results
+        detailed_results = attempt.get_detailed_results(normalized_questions)
+        
+        logger.info("Retrieved exam results", 
+                   attempt_id=attempt_id,
+                   score=attempt.score)
         
         return {
-            "success": True,
-            "parsed_data": parsed_data,
-            "questions_found": parsed_data.get("total_questions", 0),
-            "total_marks": parsed_data.get("total_marks", 0),
-            "message": f"Successfully parsed {parsed_data.get('total_questions', 0)} questions from PDF"
+            "attempt_id": attempt_id,
+            "score": attempt.score,
+            "total_marks": attempt.total_marks,
+            "percentage": attempt.percentage,
+            "time_taken_seconds": attempt.time_taken_seconds,
+            "display_time": attempt.display_time_taken,
+            "started_at": attempt.started_at.isoformat() if attempt.started_at else None,
+            "submitted_at": attempt.submitted_at.isoformat() if attempt.submitted_at else None,
+            "paper_info": {
+                "exam_type": exam_type,
+                "filename": filename,
+                "title": paper.get("title", ""),
+                "exam_name": paper.get("exam_name", exam_type),
+                "year": paper.get("year", 2024)
+            },
+            "detailed_results": detailed_results
         }
-
-    except ParkhoError as e:
-        logger.error("Failed to parse PDF", error=str(e))
-        raise HTTPException(status_code=400, detail=str(e))
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error("Unexpected error parsing PDF", error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail=f"Failed to parse PDF: {str(e)}")
-
-
-@router.post("/papers/import", response_model=dict)
-async def import_paper_from_pdf(
-    request: dict,
-    db=Depends(get_db)
-) -> dict:
-    """
-    Parse PDF from URL and import it as an exam paper into the database.
-    
-    This endpoint is for admin/dev use to import question papers from PDFs.
-    
-    Request body:
-        - url: URL of the PDF file
-        - title: Optional exam title
-        - year: Optional exam year
-        - exam_name: Optional exam name
-        - time_limit_minutes: Optional time limit (default: 180)
-        - activate: Whether to activate the paper immediately (default: true)
-    """
-    try:
-        from ..schemas import ImportPaperRequest, ImportPaperResponse
-        
-        # Validate request
-        import_request = ImportPaperRequest(**request)
-        
-        pyq_service = PYQService(db)
-        
-        # Build metadata
-        metadata = {}
-        if import_request.title:
-            metadata["title"] = import_request.title
-        if import_request.year:
-            metadata["year"] = import_request.year
-        if import_request.exam_name:
-            metadata["exam_name"] = import_request.exam_name
-        if import_request.time_limit_minutes:
-            metadata["time_limit_minutes"] = import_request.time_limit_minutes
-        
-        # Import paper
-        result = await pyq_service.import_paper_from_pdf(
-            import_request.url,
-            metadata=metadata if metadata else None,
-            activate=import_request.activate
-        )
-        
-        logger.info(
-            "Paper imported from PDF",
-            paper_id=result["paper_id"],
-            title=result["title"],
-            questions=result["questions_imported"]
-        )
-        
-        return {
-            "success": True,
-            "paper_id": result["paper_id"],
-            "title": result["title"],
-            "questions_imported": result["questions_imported"],
-            "total_marks": result["total_marks"],
-            "message": f"Successfully imported paper '{result['title']}' with {result['questions_imported']} questions"
-        }
-
-    except ParkhoError as e:
-        logger.error("Failed to import paper from PDF", error=str(e))
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error("Unexpected error importing paper from PDF", error=str(e), exc_info=e)
-        raise HTTPException(status_code=500, detail=f"Failed to import paper: {str(e)}")
+        logger.error("Get results failed", 
+                    attempt_id=attempt_id, 
+                    error=str(e), 
+                    exc_info=e)
+        raise HTTPException(status_code=500, detail=str(e))

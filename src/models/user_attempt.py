@@ -15,7 +15,7 @@ class UserAttempt(Base):
     __tablename__ = "user_attempts"
 
     id = Column(Integer, primary_key=True, index=True)
-    paper_id = Column(Integer, ForeignKey("exam_papers.id"), nullable=False, index=True)
+    paper_id = Column(Integer, ForeignKey("exam_papers.id"), nullable=True, index=True)  # Nullable for GCS papers
     user_identifier = Column(String(100), nullable=True, index=True)  # Optional user identification
 
     # Attempt results

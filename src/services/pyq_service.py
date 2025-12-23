@@ -2,6 +2,9 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 import structlog
 from datetime import datetime
+import json
+import re
+from pathlib import Path
 
 from ..models.exam_paper import ExamPaper
 from ..models.user_attempt import UserAttempt
@@ -488,3 +491,304 @@ class PYQService:
                     raise ParkhoError(f"Question {i+1} missing required field: {field}")
         
         logger.debug("Paper data validation successful", questions_count=len(questions))
+
+    # =============================================================================
+    # FOLDER-BASED PAPER DISCOVERY (Auto-discovery from pyq_json folder)
+    # =============================================================================
+
+    def scan_papers_from_folder(self, exam_type: str) -> List[Dict[str, Any]]:
+        """
+        Scan papers from pyq_json/{exam_type}/ folder structure.
+
+        Args:
+            exam_type: "UGC_NET" or "MPSET"
+
+        Returns:
+            List of paper metadata dictionaries
+        """
+        try:
+            folder_path = Path(f"pyq_json/{exam_type}")
+
+            if not folder_path.exists():
+                logger.warning(f"Papers folder does not exist: {folder_path}")
+                return []
+
+            papers = []
+
+            for json_file in folder_path.glob("*.json"):
+                try:
+                    # Validate and extract metadata from JSON file
+                    paper_metadata = self._extract_paper_metadata(json_file, exam_type)
+                    if paper_metadata:
+                        papers.append(paper_metadata)
+
+                except Exception as e:
+                    logger.error(f"Failed to process file {json_file}: {e}")
+                    continue
+
+            # Sort by year (descending) then by filename - handle None years properly
+            papers.sort(key=lambda x: (x.get('year') or 0, x['filename']), reverse=True)
+
+            logger.info(f"Scanned papers from folder",
+                       exam_type=exam_type,
+                       papers_found=len(papers))
+
+            return papers
+
+        except Exception as e:
+            logger.error(f"Failed to scan papers from folder: {e}", exc_info=e)
+            raise ParkhoError(f"Failed to scan papers for {exam_type}: {str(e)}")
+
+    def _extract_paper_metadata(self, json_file: Path, exam_type: str) -> Optional[Dict[str, Any]]:
+        """
+        Extract metadata from a JSON paper file.
+
+        Args:
+            json_file: Path to the JSON file
+            exam_type: Type of exam (UGC_NET, MPSET)
+
+        Returns:
+            Dictionary with paper metadata
+        """
+        try:
+            # Load and validate JSON structure
+            with open(json_file, 'r', encoding='utf-8') as f:
+                questions_data = json.load(f)
+
+            # Validate it's a list of questions
+            if not isinstance(questions_data, list):
+                logger.error(f"Invalid JSON structure in {json_file}: expected list")
+                return None
+
+            if not questions_data:
+                logger.warning(f"Empty questions list in {json_file}")
+                return None
+
+            # Validate first question structure
+            sample_question = questions_data[0]
+            required_fields = ["id", "type", "question", "options", "correct_answer"]
+            missing_fields = [field for field in required_fields if field not in sample_question]
+
+            if missing_fields:
+                logger.error(f"Invalid question structure in {json_file}: missing {missing_fields}")
+                return None
+
+            # Extract metadata
+            filename = json_file.name
+            file_stat = json_file.stat()
+
+            # Smart metadata extraction
+            year = self._extract_year_from_filename(filename)
+            title = self._generate_title_from_filename(filename, exam_type)
+            subject = self._extract_subject_from_filename(filename)
+
+            # Analyze question types
+            question_types = self._analyze_question_types(questions_data)
+
+            metadata = {
+                "filename": filename,
+                "file_path": str(json_file),
+                "exam_type": exam_type,
+                "title": title,
+                "year": year,
+                "subject": subject,
+                "total_questions": len(questions_data),
+                "total_marks": len(questions_data),  # Assume 1 mark per question
+                "time_limit_minutes": 180,  # Default 3 hours
+                "display_name": title,
+                "description": f"{exam_type} {subject} paper with {len(questions_data)} questions",
+                "question_types": question_types,
+                "file_size": file_stat.st_size,
+                "last_modified": datetime.fromtimestamp(file_stat.st_mtime).isoformat(),
+                "is_valid": True,
+                "created_at": datetime.fromtimestamp(file_stat.st_mtime).isoformat()
+            }
+
+            logger.debug(f"Extracted metadata from {filename}",
+                        title=title, year=year, questions=len(questions_data))
+
+            return metadata
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in {json_file}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to extract metadata from {json_file}: {e}")
+            return None
+
+    def _extract_year_from_filename(self, filename: str) -> Optional[int]:
+        """Extract year from filename like 'ugc-net-paper-ii-december-2024-law'"""
+        year_match = re.search(r'20\d{2}', filename)
+        return int(year_match.group()) if year_match else None
+
+    def _generate_title_from_filename(self, filename: str, exam_type: str) -> str:
+        """Generate a readable title from filename"""
+        # Remove extension and clean up
+        name = Path(filename).stem
+        title = name.replace('-', ' ').replace('_', ' ')
+
+        # Capitalize words
+        title = ' '.join(word.capitalize() for word in title.split())
+
+        # Clean up common patterns
+        title = title.replace('Ugc Net', 'UGC NET')
+        title = title.replace('Mpset', 'MPSET')
+        title = title.replace('Paper Ii', 'Paper II')
+        title = title.replace('Paper I ', 'Paper I ')
+        title = title.replace('Solved Paper', '')
+
+        return title.strip()
+
+    def _extract_subject_from_filename(self, filename: str) -> str:
+        """Extract subject from filename"""
+        filename_lower = filename.lower()
+
+        if 'law' in filename_lower:
+            return 'Law'
+        elif 'teaching' in filename_lower or 'research' in filename_lower:
+            return 'Teaching & Research Aptitude'
+        elif 'general' in filename_lower:
+            return 'General'
+        elif 'english' in filename_lower:
+            return 'English'
+        elif 'hindi' in filename_lower:
+            return 'Hindi'
+        elif 'computer' in filename_lower:
+            return 'Computer Science'
+        else:
+            return 'General'
+
+    def _analyze_question_types(self, questions_data: List[Dict]) -> Dict[str, int]:
+        """Analyze distribution of question types"""
+        types_count = {}
+
+        for question in questions_data:
+            q_type = question.get('type', 'standard')
+            types_count[q_type] = types_count.get(q_type, 0) + 1
+
+        return types_count
+
+    def load_paper_from_file(self, exam_type: str, filename: str, include_answers: bool = False) -> Dict[str, Any]:
+        """
+        Load full paper content from JSON file.
+
+        Args:
+            exam_type: "UGC_NET" or "MPSET"
+            filename: JSON filename
+            include_answers: Whether to include correct answers
+
+        Returns:
+            Complete paper data with questions
+        """
+        try:
+            file_path = Path(f"pyq_json/{exam_type}/{filename}")
+
+            if not file_path.exists():
+                raise ParkhoError(f"Paper file not found: {file_path}")
+
+            # Get metadata
+            metadata = self._extract_paper_metadata(file_path, exam_type)
+            if not metadata:
+                raise ParkhoError(f"Invalid paper file: {filename}")
+
+            # Load questions
+            with open(file_path, 'r', encoding='utf-8') as f:
+                questions = json.load(f)
+
+            # Process questions based on include_answers parameter
+            if not include_answers:
+                # Remove correct answers for exam mode
+                processed_questions = []
+                for question in questions:
+                    q_copy = question.copy()
+                    q_copy.pop("correct_answer", None)
+                    processed_questions.append(q_copy)
+                questions = processed_questions
+
+            paper_data = {
+                "metadata": metadata,
+                "questions": questions,
+                "total_questions": len(questions),
+                "answers_included": include_answers,
+                "loaded_at": datetime.now().isoformat()
+            }
+
+            logger.info(f"Loaded paper from file",
+                       exam_type=exam_type,
+                       filename=filename,
+                       questions=len(questions),
+                       answers_included=include_answers)
+
+            return paper_data
+
+        except ParkhoError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to load paper from file: {e}", exc_info=e)
+            raise ParkhoError(f"Failed to load paper {filename}: {str(e)}")
+
+    def get_folder_based_papers_summary(self) -> Dict[str, Any]:
+        """
+        Get summary of all papers available in pyq_json folders.
+
+        Returns:
+            Summary with papers organized by exam type
+        """
+        try:
+            exam_types = ["UGC_NET", "MPSET"]
+            summary = {
+                "exam_types": {},
+                "totals": {
+                    "total_exam_types": 0,
+                    "total_papers": 0,
+                    "total_questions": 0
+                },
+                "year_range": {
+                    "earliest": None,
+                    "latest": None
+                },
+                "scanned_at": datetime.now().isoformat()
+            }
+
+            all_years = []
+            total_papers = 0
+            total_questions = 0
+
+            for exam_type in exam_types:
+                papers = self.scan_papers_from_folder(exam_type)
+
+                if papers:
+                    summary["exam_types"][exam_type] = {
+                        "papers": papers,
+                        "count": len(papers),
+                        "total_questions": sum(p.get("total_questions", 0) for p in papers),
+                        "years": sorted(list(set(p.get("year") for p in papers if p.get("year"))), reverse=True)
+                    }
+
+                    # Collect years for overall range
+                    exam_years = [p.get("year") for p in papers if p.get("year")]
+                    all_years.extend(exam_years)
+
+                    total_papers += len(papers)
+                    total_questions += sum(p.get("total_questions", 0) for p in papers)
+
+            # Update totals
+            summary["totals"]["total_exam_types"] = len([et for et in summary["exam_types"] if summary["exam_types"][et]["papers"]])
+            summary["totals"]["total_papers"] = total_papers
+            summary["totals"]["total_questions"] = total_questions
+
+            # Update year range
+            if all_years:
+                summary["year_range"]["earliest"] = min(all_years)
+                summary["year_range"]["latest"] = max(all_years)
+
+            logger.info("Generated folder-based papers summary",
+                       total_papers=total_papers,
+                       total_questions=total_questions,
+                       exam_types=len(summary["exam_types"]))
+
+            return summary
+
+        except Exception as e:
+            logger.error(f"Failed to generate papers summary: {e}", exc_info=e)
+            raise ParkhoError(f"Failed to generate papers summary: {str(e)}")

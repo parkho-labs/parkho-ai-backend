@@ -678,6 +678,48 @@ class LegalQuestionResponse(BaseModel):
     warnings: List[str] = Field(default=[])
 
 
+# =============================================================================
+# NEW LEGAL QUIZ APIS - CUSTOM AND MOCK QUIZ
+# =============================================================================
+
+# Custom Quiz - User specifies question types and counts
+class CustomQuestionSpec(BaseModel):
+    type: LegalQuestionType
+    count: int = Field(..., ge=1, le=10, description="Number of questions (1-10)")
+
+class CustomQuizRequest(BaseModel):
+    questions: List[CustomQuestionSpec]
+    difficulty: LegalDifficultyLevel = Field(default=LegalDifficultyLevel.MODERATE, description="Overall difficulty level")
+    subject: Optional[str] = Field(default="Constitutional Law", description="Subject context")
+    scope: List[str] = Field(default=["constitution"], description="Scope: constitution, bns, or both")
+    filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters like collection_ids")
+
+# Mock Quiz - System generates random mix with equal distribution
+class MockQuizRequest(BaseModel):
+    total_questions: int = Field(..., ge=3, le=50, description="Total questions for mock quiz (3-50, must be divisible by 3)")
+    subject: Optional[str] = Field(default="Constitutional Law", description="Subject context")
+    scope: List[str] = Field(default=["constitution"], description="Scope: constitution, bns, or both")
+    filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters like collection_ids")
+
+    @field_validator('total_questions')
+    @classmethod
+    def validate_total_questions(cls, v):
+        if v % 3 != 0:
+            raise ValueError('total_questions must be divisible by 3 for equal distribution')
+        return v
+
+# Enhanced response for both new APIs
+class QuizGenerationResponse(BaseModel):
+    success: bool
+    total_generated: int
+    total_requested: int
+    questions: List[LegalQuestion]
+    generation_stats: LegalQuestionStats
+    quiz_metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional quiz metadata")
+    errors: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
 # Legal Content Retrieval Schemas (/retrieve)
 class LegalRetrieveRequest(BaseModel):
     query: str
@@ -760,7 +802,7 @@ class StartAttemptResponse(BaseModel):
 
 
 class ExamAnswers(BaseModel):
-    answers: Dict[int, str] = Field(..., description="Mapping of question_id to selected_answer")
+    answers: Dict[str, str] = Field(..., description="Mapping of question_id to selected_answer")
 
 
 class QuestionResult(BaseModel):
