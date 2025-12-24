@@ -6,9 +6,9 @@ from typing import List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response, Query, Request
 from sqlalchemy.orm import Session
 
-from src.api.dependencies import get_current_user_conditional, get_db, get_file_storage, get_gcp_service
+from src.api.dependencies import get_current_user_conditional, get_db, get_file_storage, get_gcp_service, get_collection_service
 from src.services.file_storage import FileStorageService
-from src.services.rag import core_rag_client as rag_client, CoreRagClient as RagClient
+from src.services.collection_service import CollectionService
 from src.models.user import User
 from src.models.uploaded_file import UploadedFile
 from src.api.v1.schemas import (
@@ -75,7 +75,8 @@ async def confirm_upload(
     request: FileConfirmRequest,
     current_user: User = Depends(get_current_user_conditional),
     gcp_service: GCPService = Depends(get_gcp_service),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    service: CollectionService = Depends(get_collection_service)
 ):
     try:
         file_record = db.query(UploadedFile).filter(UploadedFile.id == request.file_id).first()
@@ -92,7 +93,18 @@ async def confirm_upload(
                 logger.error("File confirmation failed: Not found in GCS", file_id=file_record.id, blob_name=blob_name)
                 raise HTTPException(status_code=400, detail="File verification failed: Not found in GCS bucket.")
 
-        rag_status = "skipped"
+            # Trigger RAG Indexing via Service
+            gcs_uri = gcp_service.get_gcs_uri(blob_name)
+            rag_status = await service.trigger_indexing(
+                user_id=current_user.user_id,
+                file_id=request.file_id,
+                gcs_uri=gcs_uri
+            )
+            rag_message = f"File confirmed. Linking status: {rag_status}"
+        else:
+            rag_message = "File confirmed (non-GCS storage)"
+            rag_status = "confirmed"
+
         file_record.indexing_status = rag_status
         db.commit()
 
@@ -115,21 +127,38 @@ async def upload_file(
     file: UploadFile = File(...),
     indexing: bool = Query(True),
     current_user: User = Depends(get_current_user_conditional),
-    # RAG operations disabled for file uploads
+    # RAG operations re-enabled
     file_storage: FileStorageService = Depends(get_file_storage),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    service: CollectionService = Depends(get_collection_service),
+    gcp_service: GCPService = Depends(get_gcp_service)
 ) -> RAGFileUploadResponse:
     try:
         initial_status = RAGIndexingStatus.INDEXING_PENDING if indexing else "skipped"
         file_id = await file_storage.store_file(file, ttl_hours=24*365, indexing_status=initial_status)
         
-        rag_status = "skipped"
-        rag_message = "Indexing logic disabled"
-
         file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
-        if file_record:
-            file_record.indexing_status = rag_status
-            db.commit()
+        rag_status = initial_status
+        rag_message = "File uploaded successfully."
+
+        if indexing and file_record:
+             if file_record.file_path and StorageConfig.GCS_DOMAIN in file_record.file_path:
+                 from urllib.parse import urlparse
+                 parsed = urlparse(file_record.file_path)
+                 path_parts = parsed.path.lstrip("/").split("/", 1)
+                 blob_name = path_parts[1] if len(path_parts) >= 2 else None
+                 
+                 if blob_name:
+                     gcs_uri = gcp_service.get_gcs_uri(blob_name)
+                     rag_status = await service.trigger_indexing(
+                         user_id=current_user.user_id,
+                         file_id=file_id,
+                         gcs_uri=gcs_uri
+                     )
+                     rag_message = f"File uploaded. Linking status: {rag_status}"
+             
+             file_record.indexing_status = rag_status
+             db.commit()
 
         return RAGFileUploadResponse(
             file_id=file_id,
@@ -148,7 +177,6 @@ async def upload_file(
 @router.get("/", response_model=RAGFilesListResponse)
 async def list_all_files(
     current_user: User = Depends(get_current_user_conditional),
-    # RAG operations disabled for file uploads
     db: Session = Depends(get_db),
     gcp_service: GCPService = Depends(get_gcp_service),
     file_storage: FileStorageService = Depends(get_file_storage)
@@ -216,7 +244,6 @@ async def _process_delete_file(
 async def delete_file_from_rag(
     file_id: str,
     current_user: User = Depends(get_current_user_conditional),
-    # RAG operations disabled for file uploads
     db: Session = Depends(get_db),
     file_storage: FileStorageService = Depends(get_file_storage),
     gcp_service: GCPService = Depends(get_gcp_service)

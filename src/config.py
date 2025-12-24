@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
 
     api_host: str = Field(default="localhost", description="API host")
-    api_port: int = Field(default=8080, description="API port")
+    api_port: int = Field(default=8000, description="API port")
     debug: bool = Field(default=False, description="Debug mode")
 
     # Authentication Configuration

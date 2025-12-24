@@ -27,6 +27,9 @@ from src.api.v1.schemas import (
     SubmitAttemptResponse
 )
 from src.core.database import get_db
+from src.api.dependencies import get_llm_service
+from src.services.llm_service import LLMService
+import asyncio
 
 logger = structlog.get_logger(__name__)
 
@@ -66,23 +69,11 @@ async def generate_legal_questions(
         for question_spec in request.questions:
             total_requested += question_spec.count
 
-            # Map legal question types to RAG service types
-            rag_type_mapping = {
-                "assertion_reasoning": "assertion_reasoning",
-                "match_following": "match_following",
-                "comprehension": "comprehension"
-            }
-
-            rag_type = rag_type_mapping.get(question_spec.type.value)
-            if not rag_type:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Unsupported question type: {question_spec.type.value}"
-                )
-
+            # Pass question type directly to RAG (no mapping needed)
+            # RAG will handle whatever question type is sent
             rag_question = {
-                "type": rag_type,
-                "difficulty": question_spec.difficulty.value,
+                "type": question_spec.type,  # Pass through as-is
+                "difficulty": question_spec.difficulty,
                 "count": question_spec.count,
                 "filters": question_spec.filters or {"collection_ids": ["constitution-golden-source"]}
             }
@@ -236,23 +227,11 @@ async def generate_custom_quiz(
         for question_spec in request.questions:
             total_requested += question_spec.count
 
-            # Map legal question types to RAG service types
-            rag_type_mapping = {
-                "assertion_reasoning": "assertion_reasoning",
-                "match_following": "match_following",
-                "comprehension": "comprehension"
-            }
-
-            rag_type = rag_type_mapping.get(question_spec.type.value)
-            if not rag_type:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Unsupported question type: {question_spec.type.value}"
-                )
-
+            # Pass question type directly to RAG (no mapping needed)
+            # RAG will handle whatever question type is sent
             rag_question = {
-                "type": rag_type,
-                "difficulty": request.difficulty.value,  # Same difficulty for all questions
+                "type": question_spec.type,  # Pass through as-is
+                "difficulty": request.difficulty,  # Same difficulty for all questions
                 "count": question_spec.count,
                 "filters": request.filters or {"collection_ids": ["constitution-golden-source"]}
             }
@@ -283,7 +262,7 @@ async def generate_custom_quiz(
                 ),
                 quiz_metadata={
                     "quiz_type": "custom",
-                    "requested_difficulty": request.difficulty.value,
+                    "requested_difficulty": request.difficulty,
                     "subject": request.subject,
                     "scope": request.scope
                 },
@@ -293,6 +272,7 @@ async def generate_custom_quiz(
 
         # Transform RAG response to legal format
         legal_questions = []
+        legal_questions_with_answers = []  # Store full questions with answers for DB
         type_counts = {}
         difficulty_counts = {}
 
@@ -302,7 +282,7 @@ async def generate_custom_quiz(
             metadata = LegalQuestionMetadata(
                 question_id=str(uuid.uuid4()),
                 type=question_data.get("metadata", {}).get("type", "unknown"),
-                difficulty=question_data.get("metadata", {}).get("difficulty", request.difficulty.value),
+                difficulty=question_data.get("metadata", {}).get("difficulty", request.difficulty),
                 estimated_time=question_data.get("metadata", {}).get("estimated_time", 3),
                 source_files=question_data.get("metadata", {}).get("source_files", []),
                 generated_at=datetime.now().isoformat()
@@ -312,11 +292,30 @@ async def generate_custom_quiz(
             type_counts[metadata.type] = type_counts.get(metadata.type, 0) + 1
             difficulty_counts[metadata.difficulty] = difficulty_counts.get(metadata.difficulty, 0) + 1
 
-            legal_question = LegalQuestion(
+            # Full question with answers (for DB storage)
+            full_question = LegalQuestion(
                 metadata=metadata,
                 content=question_data.get("content", {})
             )
-            legal_questions.append(legal_question)
+            legal_questions_with_answers.append(full_question)
+            
+            # Conditionally strip answers for frontend response
+            if request.include_answers:
+                # Include everything
+                legal_questions.append(full_question)
+            else:
+                # Remove answer fields from content
+                content_without_answers = question_data.get("content", {}).copy()
+                # Remove answer-related fields based on question type
+                content_without_answers.pop("correct_option", None)
+                content_without_answers.pop("correct_matches", None)
+                content_without_answers.pop("explanation", None)
+                
+                question_for_frontend = LegalQuestion(
+                    metadata=metadata,
+                    content=content_without_answers
+                )
+                legal_questions.append(question_for_frontend)
 
         # Build generation stats
         generation_stats = LegalQuestionStats(
@@ -335,10 +334,10 @@ async def generate_custom_quiz(
             generation_stats=generation_stats,
             quiz_metadata={
                 "quiz_type": "custom",
-                "requested_difficulty": request.difficulty.value,
+                "requested_difficulty": request.difficulty,
                 "subject": request.subject,
                 "scope": request.scope,
-                "user_specified_types": [q.type.value for q in request.questions],
+                "user_specified_types": [q.type for q in request.questions],
                 "user_specified_counts": [q.count for q in request.questions]
             },
             errors=[],
@@ -353,11 +352,12 @@ async def generate_custom_quiz(
                 total_marks=len(legal_questions),
                 started_at=datetime.now()
             )
+            # Store FULL questions with answers for scoring later
             attempt.answers = json.dumps({
                 "quiz_type": "custom",
                 "subject": request.subject,
                 "scope": request.scope,
-                "questions": [q.dict() for q in legal_questions]
+                "questions": [q.dict() for q in legal_questions_with_answers]
             })
             db.add(attempt)
             db.commit()
@@ -456,6 +456,7 @@ async def generate_mock_quiz(
             )
 
         legal_questions = []
+        legal_questions_with_answers = []  # Store full questions with answers for DB
         actual_type_counts = {}
         actual_difficulty_counts = {}
 
@@ -471,11 +472,31 @@ async def generate_mock_quiz(
             )
             actual_type_counts[metadata.type] = actual_type_counts.get(metadata.type, 0) + 1
             actual_difficulty_counts[metadata.difficulty] = actual_difficulty_counts.get(metadata.difficulty, 0) + 1
-            legal_question = LegalQuestion(
+            
+            # Full question with answers (for DB storage)
+            full_question = LegalQuestion(
                 metadata=metadata,
                 content=question_data.get("content", {})
             )
-            legal_questions.append(legal_question)
+            legal_questions_with_answers.append(full_question)
+            
+            # Conditionally strip answers for frontend response
+            if request.include_answers:
+                # Include everything
+                legal_questions.append(full_question)
+            else:
+                # Remove answer fields from content
+                content_without_answers = question_data.get("content", {}).copy()
+                # Remove answer-related fields based on question type
+                content_without_answers.pop("correct_option", None)
+                content_without_answers.pop("correct_matches", None)
+                content_without_answers.pop("explanation", None)
+                
+                question_for_frontend = LegalQuestion(
+                    metadata=metadata,
+                    content=content_without_answers
+                )
+                legal_questions.append(question_for_frontend)
 
         generation_stats = LegalQuestionStats(
             total_requested=total_requested,
@@ -525,7 +546,7 @@ async def generate_mock_quiz(
                 "quiz_type": "mock",
                 "subject": request.subject,
                 "scope": request.scope,
-                "questions": [q.dict() for q in legal_questions]
+                "questions": [q.dict() for q in legal_questions_with_answers]
             })
             db.add(attempt)
             db.commit()
@@ -559,10 +580,12 @@ async def generate_mock_quiz(
 async def submit_legal_quiz(
     attempt_id: int = PathParam(..., description="Quiz attempt ID"),
     answers: ExamAnswers = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    llm_service: LLMService = Depends(get_llm_service)
 ) -> SubmitAttemptResponse:
     """
     Submit answers for a generated legal quiz and get score.
+    Includes automatic explanation generation if missing.
     """
     try:
         from src.models.user_attempt import UserAttempt
@@ -580,8 +603,12 @@ async def submit_legal_quiz(
         correct_count = 0
         question_results = []
         submitted_answers = answers.answers if answers else {}
-        
-        for q in questions:
+
+        # Prepare tasks for missing explanations
+        explanation_tasks = []
+        task_indices = []
+
+        for i, q in enumerate(questions):
             q_metadata = q.get("metadata", {})
             q_id = q_metadata.get("question_id")
             q_content = q.get("content", {})
@@ -596,7 +623,28 @@ async def submit_legal_quiz(
             
             if is_correct:
                 correct_count += 1
+
+            # Get or generate explanation
+            explanation = q_content.get("explanation", "").strip()
+            
+            if not explanation:
+                # Prepare LLM task to generate explanation
+                q_text = q_content.get("question_text", "")
+                q_options = q_content.get("options", [])
                 
+                system_prompt = "You are an expert Indian Legal Assistant. Provide a concise, accurate explanation for the correct answer to the given legal question."
+                user_prompt = f"""
+                Question: {q_text}
+                Options: {q_options}
+                Correct Answer: {correct_ans}
+                
+                Provide a 2-3 sentence explanation explaining why this answer is correct according to the Indian Constitution or relevant laws.
+                """
+                
+                explanation_tasks.append(llm_service.generate_with_fallback(system_prompt, user_prompt))
+                task_indices.append(i)
+                explanation = "Generating explanation..." # Placeholder
+            
             question_results.append({
                 "question_id": str(q_id),
                 "question_text": q_content.get("question_text", ""),
@@ -604,8 +652,18 @@ async def submit_legal_quiz(
                 "user_answer": str(user_ans) if user_ans else None,
                 "is_correct": is_correct,
                 "is_attempted": user_ans is not None,
+                "explanation": explanation,
                 "marks": 1.0
             })
+
+        # Resolve LLM tasks if any
+        if explanation_tasks:
+            generated_explanations = await asyncio.gather(*explanation_tasks, return_exceptions=True)
+            for idx, generated_exp in zip(task_indices, generated_explanations):
+                if isinstance(generated_exp, str):
+                    question_results[idx]["explanation"] = generated_exp
+                else:
+                    question_results[idx]["explanation"] = "Explanation could not be generated at this time."
             
         attempt.score = float(correct_count)
         attempt.total_marks = float(len(questions))

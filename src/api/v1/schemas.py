@@ -322,6 +322,14 @@ class RAGFileDetail(BaseModel):
     file_type: Optional[str] = None
     file_size: int
     upload_date: str
+    indexing_status: Optional[str] = "pending"
+
+
+class CollectionStatusResponse(BaseModel):
+    collection_id: str
+    name: str
+    files: List[RAGFileDetail]
+    status: str = "success"
 
 
 class RAGCollectionFilesResponse(BaseModel):
@@ -353,7 +361,7 @@ class CollectionChatRequest(BaseModel):
 
 class CollectionSummaryResponse(BaseModel):
     summary: str
-    processing_time_ms: int
+    processing_time_ms: Optional[int] = 0
     collection_id: Optional[str] = None
     chunks_analyzed: Optional[int] = None
 
@@ -578,17 +586,14 @@ class HealthCheckResponse(BaseModel):
 # LEGAL RAG ENGINE SCHEMAS (for /law/chat, /questions/generate, /retrieve)
 # =============================================================================
 
-# Legal Question Types (as documented in BACKEND_API_INTEGRATION.md)
-class LegalQuestionType(str, Enum):
-    ASSERTION_REASONING = "assertion_reasoning"
-    MATCH_FOLLOWING = "match_following"
-    COMPREHENSION = "comprehension"
+# Legal Question Types - Flexible string to pass through to RAG
+# Common types: "mcq", "assertion_reasoning", "match_following", "comprehension"
+# This is intentionally NOT an Enum to allow RAG to define new types without backend changes
 
 
-class LegalDifficultyLevel(str, Enum):
-    EASY = "easy"
-    MODERATE = "moderate"
-    DIFFICULT = "difficult"
+# Legal Difficulty Levels - Flexible string to pass through to RAG
+# Common levels: "easy", "moderate", "difficult"
+LegalDifficultyLevel = str
 
 
 # Law Chat Endpoint Schemas (/law/chat)
@@ -610,7 +615,7 @@ class LawChatResponse(BaseModel):
 
 # Legal Question Generation Schemas (/questions/generate)
 class LegalQuestionSpec(BaseModel):
-    type: LegalQuestionType
+    type: str = Field(..., description="Question type (e.g., 'mcq', 'assertion_reasoning', 'match_following', 'comprehension')")
     difficulty: LegalDifficultyLevel
     count: int = Field(..., ge=1, le=10, description="Number of questions (1-10)")
     filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters like collection_ids")
@@ -699,15 +704,16 @@ class LegalQuestionResponse(BaseModel):
 
 # Custom Quiz - User specifies question types and counts
 class CustomQuestionSpec(BaseModel):
-    type: LegalQuestionType
+    type: str = Field(..., description="Question type (e.g., 'mcq', 'assertion_reasoning', 'match_following', 'comprehension')")
     count: int = Field(..., ge=1, le=10, description="Number of questions (1-10)")
 
 class CustomQuizRequest(BaseModel):
     questions: List[CustomQuestionSpec]
-    difficulty: LegalDifficultyLevel = Field(default=LegalDifficultyLevel.MODERATE, description="Overall difficulty level")
+    difficulty: LegalDifficultyLevel = Field(default="moderate", description="Overall difficulty level")
     subject: Optional[str] = Field(default="Constitutional Law", description="Subject context")
     scope: List[str] = Field(default=["constitution"], description="Scope: constitution, bns, or both")
     filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters like collection_ids")
+    include_answers: bool = Field(default=False, description="If True, include answers in response. If False, only return questions for quiz-taking")
 
 # Mock Quiz - System generates random mix with equal distribution
 class MockQuizRequest(BaseModel):
@@ -715,6 +721,7 @@ class MockQuizRequest(BaseModel):
     subject: Optional[str] = Field(default="Constitutional Law", description="Subject context")
     scope: List[str] = Field(default=["constitution"], description="Scope: constitution, bns, or both")
     filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters like collection_ids")
+    include_answers: bool = Field(default=False, description="If True, include answers in response. If False, only return questions for quiz-taking")
 
     @field_validator('total_questions')
     @classmethod
@@ -825,12 +832,13 @@ class ExamAnswers(BaseModel):
 
 
 class QuestionResult(BaseModel):
-    question_id: int
+    question_id: str
     question_text: str
     correct_answer: str
     user_answer: Optional[str] = None
     is_correct: bool
     is_attempted: bool
+    explanation: Optional[str] = None
     marks: float
 
 

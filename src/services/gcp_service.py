@@ -76,6 +76,10 @@ class GCPService:
     def get_public_url(self, blob_name: str) -> str:
          return f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
 
+    def get_gcs_uri(self, blob_name: str) -> str:
+         """Returns the gs://bucket/blob URI used by RAG engine."""
+         return f"gs://{self.bucket_name}/{blob_name}"
+
     def generate_download_signed_url(self, blob_name: str, expiration_minutes: int = 60) -> Optional[str]:
         if not self.client:
             return None

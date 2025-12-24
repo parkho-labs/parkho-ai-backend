@@ -119,3 +119,24 @@ class CoreRagClient(BaseRagClient):
         except Exception as e:
             self.logger.error(f"RAG delete collection unexpected error: {e}")
             raise ParkhoError(f"Unexpected error deleting collection: {e}")
+
+    async def get_file_chunks(self, user_id: str, file_id: str) -> List[dict]:
+        """Fetch raw chunks for a specific file to verify indexing content."""
+        try:
+            # Use retrieve endpoint with file_id filter
+            payload = {
+                "query": "the", # Generic query to find everything
+                "top_k": 50,
+                "filters": {"file_id": file_id}
+            }
+            response = await self.client.post(
+                f"{self.base_url}/retrieve",
+                headers=self._get_headers(user_id),
+                json=payload
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("results", [])
+        except Exception as e:
+            self.logger.error(f"Failed to fetch chunks for file {file_id}: {e}")
+            return []
