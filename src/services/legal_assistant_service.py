@@ -9,7 +9,7 @@ import structlog
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-from ..services.rag_client import RagClient, RagQueryRequest
+from ..services.rag import LawRagClient, RagQueryRequest
 from ..services.rag_question_generator_service import RagQuestionGeneratorService
 from ..api.v1.schemas import (
     LawChatRequest, LawChatResponse, LawSource,
@@ -33,7 +33,7 @@ class LegalAssistantService:
     underlying RAG services, handling legal-specific transformations and defaults.
     """
 
-    def __init__(self, rag_client: RagClient):
+    def __init__(self, rag_client: LawRagClient):
         self.rag_client = rag_client
         self.rag_question_service = RagQuestionGeneratorService.get_instance()
         self.default_collections = ["constitution-golden-source"]
@@ -242,7 +242,7 @@ class LegalAssistantService:
 _legal_service_instance: Optional[LegalAssistantService] = None
 
 
-def get_legal_assistant_service(rag_client: RagClient) -> LegalAssistantService:
+def get_legal_assistant_service(rag_client: LawRagClient) -> LegalAssistantService:
     """Get or create legal assistant service instance."""
     global _legal_service_instance
     if _legal_service_instance is None:

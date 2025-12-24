@@ -217,10 +217,50 @@ async def get_user_stats(
     return {
         "papers_attempted": papers_attempted,
         "completed": completed,
-        "best_score": int(round(best_score)) if best_score else 0,
-        "average_score": int(round(average_score)) if average_score else 0,
-        "day_streak": day_streak
+        "best_score": int(round(best_score)),
+        "average_score": int(round(average_score)),
+        "day_streak": day_streak,
+        # New Stats
+        "total_time_spent_minutes": int(sum(a.time_taken_seconds or 0 for a in submitted_attempts) / 60),
+        "avg_time_per_paper_minutes": int((sum(a.time_taken_seconds or 0 for a in submitted_attempts) / len(submitted_attempts) / 60)) if submitted_attempts else 0,
+        "total_questions_answered": sum(1 for a in submitted_attempts for q in (a.answers_dict or {}).get("submitted_answers", {})),
+        "recent_scores": [
+            {
+                "date": a.submitted_at.isoformat() if a.submitted_at else a.started_at.isoformat(),
+                "score": int(round(a.percentage or 0)),
+                "paper": (a.answers_dict or {}).get("paper_title", "Unknown Paper")
+            }
+            for a in sorted(submitted_attempts, key=lambda x: x.submitted_at or x.started_at, reverse=True)[:5]
+        ],
+        "exam_breakdown": _get_exam_breakdown(all_attempts)
     }
+
+def _get_exam_breakdown(attempts):
+    """Helper to calculate stats per exam type (UGC NET, MPSET, etc.)"""
+    breakdown = {}
+    for a in attempts:
+        if not a.is_submitted:
+            continue
+            
+        data = a.answers_dict or {}
+        exam_type = data.get("exam_type", "OTHER")
+        
+        if exam_type not in breakdown:
+            breakdown[exam_type] = {"attempts": 0, "total_score": 0, "best_score": 0}
+            
+        breakdown[exam_type]["attempts"] += 1
+        breakdown[exam_type]["total_score"] += (a.percentage or 0)
+        breakdown[exam_type]["best_score"] = max(breakdown[exam_type]["best_score"], (a.percentage or 0))
+    
+    # Finalize averages
+    for etype in breakdown:
+        stats = breakdown[etype]
+        if stats["attempts"] > 0:
+            stats["average_score"] = int(round(stats["total_score"] / stats["attempts"]))
+            stats["best_score"] = int(round(stats["best_score"]))
+            del stats["total_score"]  # Clean up intermediate value
+            
+    return breakdown
 
 
 @router.post("/papers/{exam_type}/{filename}/start")

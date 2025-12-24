@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     firebase_service_account_path: str = Field(default="nyayamind-dev-firebase-adminsdk-fbsvc-db8b836225.json", description="Firebase service account JSON file path")
     firebase_project_id: str = Field(default="nyayamind-dev", description="Firebase project ID")
     firebase_web_client_id: str = Field(default="722723826302:web:your-web-app-id", description="Firebase web client ID")
+    service_account_email: Optional[str] = Field(default=None, description="Service account email for GCP identity")
     
     max_video_length_minutes: int = Field(default=30, description="Maximum video length in minutes")
     max_concurrent_jobs: int = Field(default=5, description="Maximum concurrent processing jobs")
@@ -80,7 +81,7 @@ class Settings(BaseSettings):
     use_secret_manager: bool = Field(default=False, description="Use Secret Manager for API keys")
 
     # RAG Engine Configuration
-    rag_engine_url: str = Field(default="https://rag-engine-api-722723826302.asia-south2.run.app/api/v1", description="RAG Engine API base URL")
+    rag_engine_url: str = Field(default="http://localhost:8000/api/v1", description="RAG Engine API base URL")
     rag_questions_timeout: float = Field(default=60.0, description="Timeout for RAG question generation requests in seconds")
 
     # Analytics Dashboard Configuration

@@ -9,8 +9,8 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Body
 from typing import List
 
-from src.api.dependencies import get_legal_user_id_required, get_rag_client
-from src.services.rag_client import RagClient
+from src.api.dependencies import get_legal_user_id_required, get_law_rag_client
+from src.services.rag import LawRagClient
 from src.api.v1.schemas import LegalRetrieveRequest, LegalRetrieveResponse, LegalChunk
 
 logger = structlog.get_logger(__name__)
@@ -21,7 +21,7 @@ router = APIRouter()
 @router.post("/search-content", response_model=LegalRetrieveResponse)
 async def retrieve_constitutional_content(
     request: LegalRetrieveRequest = Body(...),
-    rag_client: RagClient = Depends(get_rag_client)
+    rag_client: LawRagClient = Depends(get_law_rag_client)
 ) -> LegalRetrieveResponse:
     """
     Direct constitutional content retrieval for research.

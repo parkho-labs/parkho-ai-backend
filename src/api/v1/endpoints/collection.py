@@ -18,11 +18,16 @@ from src.api.v1.schemas import (
     RAGQueryResponse,
     RAGCollectionFilesResponse,
     RAGFileDetail,
-    RAGLinkContentRequest, # We might just use Body directly but let's see
+    RAGLinkContentRequest,
     FileUploadUrlRequest,
     PresignedUrlResponse,
     FileConfirmRequest,
-    RAGFileUploadResponse
+    RAGFileUploadResponse,
+    CollectionChatRequest,
+    CollectionSummaryResponse,
+    QueryResponse,
+    QuestionGenerationResponse,
+    CollectionStatusResponse
 )
 from src.api.v1.constants import RAGStatus, RAGIndexingStatus, StorageConfig
 import datetime
@@ -98,7 +103,6 @@ async def delete_collection(
 @router.post("/{collection_id}/link", response_model=RAGCollectionResponse)
 async def link_files(
     collection_id: str,
-    # Accept standard Body request, mapping file_ids
     file_ids: List[str] = Body(..., embed=True), 
     current_user: User = Depends(get_current_user_conditional),
     service: CollectionService = Depends(get_collection_service)
@@ -173,36 +177,53 @@ async def generate_collection_upload_url(
     """Generate presigned upload URL for file that will be auto-linked to collection"""
     try:
         # Verify collection exists and user has access
-        collections = await service.list_collections(current_user.user_id)
-        collection_exists = any(c.id == collection_id for c in collections)
-        if not collection_exists:
-            raise HTTPException(status_code=404, detail="Collection not found")
+        try:
+            collections = await service.list_collections(current_user.user_id)
+            collection_exists = any(c.id == collection_id for c in collections)
+            if not collection_exists:
+                raise HTTPException(status_code=404, detail="Collection not found")
+        except Exception as e:
+            logger.error("Failed to verify collection access", collection_id=collection_id, error=str(e))
+            raise HTTPException(status_code=500, detail=f"Failed to verify collection: {str(e)}")
 
         # Generate file ID and presigned URL (same as /files/upload-url)
         file_id = str(uuid.uuid4())
         filename = request.filename
         blob_name = f"uploads/{current_user.user_id}/{file_id}/{filename}"
 
-        url = gcp_service.generate_upload_signed_url(
-            blob_name=blob_name,
-            content_type=request.content_type
-        )
+        try:
+            url = gcp_service.generate_upload_signed_url(
+                blob_name=blob_name,
+                content_type=request.content_type
+            )
+        except Exception as e:
+            logger.error("GCP URL generation raised exception", error=str(e))
+            url = None
 
         if not url:
-            raise HTTPException(status_code=500, detail="Failed to generate upload URL")
+            # Check if GCP credentials or bucket might be the issue
+            if not gcp_service.client:
+                detail = "GCP Client not initialized. Check server configuration."
+            else:
+                detail = "Failed to generate upload URL. Check GCS bucket access."
+            raise HTTPException(status_code=500, detail=detail)
 
         public_url = gcp_service.get_public_url(blob_name)
 
         # Create file record (same as /files/upload-url)
-        file_storage.file_repo.create_file(
-            file_id=file_id,
-            filename=request.filename,
-            file_path=public_url,
-            file_size=request.file_size,
-            content_type="FILE",
-            file_type=request.content_type,
-            indexing_status=RAGIndexingStatus.INDEXING_PENDING
-        )
+        try:
+            file_storage.file_repo.create_file(
+                file_id=file_id,
+                filename=request.filename,
+                file_path=public_url,
+                file_size=request.file_size,
+                content_type="FILE",
+                file_type=request.content_type,
+                indexing_status=RAGIndexingStatus.INDEXING_PENDING.value
+            )
+        except Exception as e:
+            logger.error("Failed to create file record in DB", error=str(e))
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
         return PresignedUrlResponse(
             upload_url=url,
@@ -251,29 +272,100 @@ async def confirm_collection_upload(
                 logger.error("File confirmation failed: Not found in GCS", file_id=file_record.id, blob_name=blob_name)
                 raise HTTPException(status_code=400, detail="File verification failed: Not found in GCS bucket.")
 
-        # Update file status
-        file_record.indexing_status = "confirmed"
-        db.commit()
+            # Trigger RAG Indexing via Service (centralized logic with retries)
+            gcs_uri = gcp_service.get_gcs_uri(blob_name)
+            rag_status = await service.trigger_indexing(
+                user_id=current_user.user_id,
+                file_id=request.file_id,
+                gcs_uri=gcs_uri,
+                collection_id=collection_id
+            )
+        else:
+            rag_status = "confirmed"
 
-        # Auto-link to collection
+        # Auto-link to collection in local DB
         try:
             linked = await service.link_files(current_user.user_id, collection_id, [request.file_id])
             logger.info("Auto-linked file to collection", file_id=request.file_id, collection_id=collection_id)
         except Exception as e:
             logger.warning("Failed to auto-link file to collection", file_id=request.file_id, collection_id=collection_id, error=str(e))
-            # Don't fail the entire operation if linking fails
 
         return RAGFileUploadResponse(
             file_id=request.file_id,
             filename=file_record.filename,
             status=RAGStatus.SUCCESS,
-            message=f"File uploaded and linked to collection successfully"
+            message=f"File uploaded successfully. Linking status: {rag_status}"
         )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to confirm collection upload", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{collection_id}/status", response_model=CollectionStatusResponse)
+async def get_collection_status(
+    collection_id: str,
+    current_user: User = Depends(get_current_user_conditional),
+    service: CollectionService = Depends(get_collection_service)
+):
+    """Get indexing status for all files in a collection"""
+    try:
+        collections = await service.list_collections(current_user.user_id)
+        collection = next((c for c in collections if c.id == collection_id), None)
+        if not collection:
+            raise HTTPException(status_code=404, detail="Collection not found")
+        
+        files = await service.get_collection_files(current_user.user_id, collection_id)
+        
+        return CollectionStatusResponse(
+            collection_id=collection_id,
+            name=collection.name,
+            files=[RAGFileDetail(**f) for f in files]
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get collection status", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{collection_id}/files/{file_id}/index")
+async def manual_trigger_indexing(
+    collection_id: str,
+    file_id: str,
+    current_user: User = Depends(get_current_user_conditional),
+    service: CollectionService = Depends(get_collection_service),
+    gcp_service: GCPService = Depends(get_gcp_service),
+    db: Session = Depends(get_db)
+):
+    """Manually trigger RAG indexing for a file (useful for retries)"""
+    try:
+        # Verify collection ownership
+        collections = await service.list_collections(current_user.user_id)
+        if not any(c.id == collection_id for c in collections):
+             raise HTTPException(status_code=404, detail="Collection not found")
+
+        file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        # Extract blob name for GCS URI
+        from urllib.parse import urlparse
+        parsed = urlparse(file_record.file_path)
+        path_parts = parsed.path.lstrip("/").split("/", 1)
+        blob_name = path_parts[1] if len(path_parts) >= 2 else None
+        
+        if not blob_name:
+             raise HTTPException(status_code=400, detail="File is not stored in GCS, cannot index.")
+
+        gcs_uri = gcp_service.get_gcs_uri(blob_name)
+        status = await service.trigger_indexing(current_user.user_id, file_id, gcs_uri, collection_id)
+        
+        return {"status": "success", "indexing_status": status, "message": f"Indexing re-triggered. New status: {status}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Manual indexing trigger failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -345,4 +437,81 @@ async def query_collection(
         raise
     except Exception as e:
         logger.error("Failed to query collection", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{collection_id}/chat", response_model=QueryResponse)
+async def chat_with_collection(
+    collection_id: str,
+    request: CollectionChatRequest,
+    current_user: User = Depends(get_current_user_conditional),
+    service: CollectionService = Depends(get_collection_service)
+):
+    """Restricted-context chat with collection"""
+    try:
+        result = await service.chat_collection(
+            current_user.user_id, 
+            collection_id, 
+            request.query,
+            request.answer_style,
+            request.max_chunks
+        )
+        return QueryResponse(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Collection chat failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{collection_id}/summary", response_model=CollectionSummaryResponse)
+async def summarize_collection(
+    collection_id: str,
+    current_user: User = Depends(get_current_user_conditional),
+    service: CollectionService = Depends(get_collection_service)
+):
+    """Professional & Educational summary of collection content"""
+    try:
+        result = await service.summary_collection(current_user.user_id, collection_id)
+        return CollectionSummaryResponse(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Collection summary failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{collection_id}/quiz")
+async def generate_collection_quiz(
+    collection_id: str,
+    num_questions: int = 10,
+    difficulty: str = "moderate",
+    current_user: User = Depends(get_current_user_conditional),
+    service: CollectionService = Depends(get_collection_service)
+):
+    """Generate quiz from collection content with mixed question types"""
+    try:
+        result = await service.quiz_collection(current_user.user_id, collection_id, num_questions, difficulty)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Collection quiz generation failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{collection_id}/files/{file_id}/chunks")
+async def get_file_chunks(
+    collection_id: str,
+    file_id: str,
+    current_user: User = Depends(get_current_user_conditional),
+    service: CollectionService = Depends(get_collection_service)
+):
+    """Inspect raw RAG chunks for a file (Debug)"""
+    try:
+        # Verify collection ownership
+        collections = await service.list_collections(current_user.user_id)
+        if not any(c.id == collection_id for c in collections):
+             raise HTTPException(status_code=404, detail="Collection not found")
+             
+        chunks = await service.get_file_chunks(current_user.user_id, file_id)
+        return {"file_id": file_id, "chunk_count": len(chunks), "chunks": chunks}
+    except Exception as e:
+        logger.error("Failed to fetch file chunks", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))

@@ -18,6 +18,7 @@ class GCPService:
         self.project_id = settings.gcp_project_id
         
         # Try to load from service account file first (Production/Configured), fallback to ADC (Local/Dev)
+        self.service_account_email = settings.service_account_email
         try:
             if settings.firebase_service_account_path and os.path.exists(settings.firebase_service_account_path):
                  try:
@@ -26,40 +27,77 @@ class GCPService:
                          settings.firebase_service_account_path
                      )
                      self.client = storage.Client(credentials=self.credentials, project=self.project_id)
+                     self.service_account_email = self.credentials.service_account_email
                  except Exception as e:
                      logger.warning("Failed to load service account file, falling back to ADC", error=str(e))
-                     logger.info("Initializing GCP Storage Client using ADC")
-                     self.client = storage.Client(project=self.project_id)
+                     self._init_adc()
             else:
                 logger.info("No service account file found or configured, using ADC")
-                self.client = storage.Client(project=self.project_id)
+                self._init_adc()
+                
         except Exception as e:
             logger.error("Failed to initialize GCP Storage Client", error=str(e))
             self.client = None
+
+    def _init_adc(self):
+        import google.auth
+        import requests
+        logger.info("Initializing GCP Storage Client using ADC")
+        credentials, project = google.auth.default()
+        self.client = storage.Client(credentials=credentials, project=self.project_id)
+        
+        self.service_account_email = getattr(credentials, "service_account_email", None)
+        
+        # Metadata Server Fallback for Cloud Run / GCE
+        if not self.service_account_email:
+             logger.info("Service account email not found in ADC credentials, attempting Metadata Server lookup")
+             try:
+                 # Metadata server URL for default service account email
+                 metadata_url = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email"
+                 headers = {"Metadata-Flavor": "Google"}
+                 response = requests.get(metadata_url, headers=headers, timeout=2)
+                 if response.status_code == 200:
+                     self.service_account_email = response.text.strip()
+                     logger.info("Successfully retrieved service account email from Metadata Server", email=self.service_account_email)
+                 else:
+                     logger.warning("Metadata server lookup failed", status_code=response.status_code)
+             except Exception as e:
+                 logger.warning("Metadata server lookup raised exception", error=str(e))
+        
+        if self.service_account_email:
+            logger.info("GCP Service initialized with service account", email=self.service_account_email)
+        else:
+            logger.warning("Could not determine service account email. IAM signing will fail if no private key is present.")
 
     def generate_upload_signed_url(
         self, 
         blob_name: str, 
         content_type: str, 
         expiration_minutes: int = 15
-    ) -> Optional[str]:
+    ) -> str:
         if not self.client:
-            logger.error("GCP Client not initialized")
-            return None
+            raise ValueError("GCP Client not initialized")
 
         try:
             bucket = self.client.bucket(self.bucket_name)
             blob = bucket.blob(blob_name)
 
-            return blob.generate_signed_url(
-                version="v4",
-                expiration=datetime.timedelta(minutes=expiration_minutes),
-                method="PUT",
-                content_type=content_type,
-            )
+            kwargs = {
+                "version": "v4",
+                "expiration": datetime.timedelta(minutes=expiration_minutes),
+                "method": "PUT",
+                "content_type": content_type,
+            }
+            
+            # If using ADC without a private key (like on Cloud Run), we MUST provide the service account email
+            if self.service_account_email:
+                kwargs["service_account_email"] = self.service_account_email
+
+            return blob.generate_signed_url(**kwargs)
         except Exception as e:
-            logger.error("Failed to generate signed URL", error=str(e))
-            return None
+            logger.error("Failed to generate signed URL", error=str(e), service_account=self.service_account_email)
+            # Re-raise with context
+            raise Exception(f"URL Generation Failed: {str(e)} (Email: {self.service_account_email})")
 
     def check_file_exists(self, blob_name: str) -> bool:
         if not self.client:
@@ -76,19 +114,28 @@ class GCPService:
     def get_public_url(self, blob_name: str) -> str:
          return f"https://storage.googleapis.com/{self.bucket_name}/{blob_name}"
 
+    def get_gcs_uri(self, blob_name: str) -> str:
+         """Returns the gs://bucket/blob URI used by RAG engine."""
+         return f"gs://{self.bucket_name}/{blob_name}"
+
     def generate_download_signed_url(self, blob_name: str, expiration_minutes: int = 60) -> Optional[str]:
         if not self.client:
             return None
         try:
             bucket = self.client.bucket(self.bucket_name)
             blob = bucket.blob(blob_name)
-            return blob.generate_signed_url(
-                version="v4",
-                expiration=datetime.timedelta(minutes=expiration_minutes),
-                method="GET",
-            )
+            
+            kwargs = {
+                "version": "v4",
+                "expiration": datetime.timedelta(minutes=expiration_minutes),
+                "method": "GET",
+            }
+            if self.service_account_email:
+                kwargs["service_account_email"] = self.service_account_email
+
+            return blob.generate_signed_url(**kwargs)
         except Exception as e:
-            logger.error("Failed to generate download signed URL", error=str(e))
+            logger.error("Failed to generate download signed URL", error=str(e), service_account=self.service_account_email)
             return None
 
     def open_file_stream(self, blob_name: str):
