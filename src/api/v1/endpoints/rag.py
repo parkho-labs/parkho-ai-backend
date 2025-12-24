@@ -3,8 +3,8 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.api.dependencies import get_current_user_conditional, get_rag_client, get_file_repository, get_collection_service
-from src.services.rag_client import (
-    RagClient,
+from src.services.rag import (
+    CoreRagClient as RagClient,
     RagLinkRequest,
     RagQueryRequest,
     RagLinkResponse,

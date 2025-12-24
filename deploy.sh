@@ -21,7 +21,7 @@ echo "🔑 Setting up Secret Manager permissions..."
 # Grant access to secrets
 gcloud secrets add-iam-policy-binding OPENAI_API_KEY --member="serviceAccount:${SERVICE_ACCOUNT}" --role="roles/secretmanager.secretAccessor" --quiet
 gcloud secrets add-iam-policy-binding GEMINI_API_KEY --member="serviceAccount:${SERVICE_ACCOUNT}" --role="roles/secretmanager.secretAccessor" --quiet
-gcloud secrets add-iam-policy-binding DATABASE_URL --member="serviceAccount:${SERVICE_ACCOUNT}" --role="roles/secretmanager.secretAccessor" --quiet
+gcloud secrets add-iam-policy-binding firebase-service-account-key --member="serviceAccount:${SERVICE_ACCOUNT}" --role="roles/secretmanager.secretAccessor" --quiet
 
 echo "🚀 Deploying to Cloud Run..."
 gcloud run deploy $SERVICE_NAME \
@@ -31,7 +31,8 @@ gcloud run deploy $SERVICE_NAME \
   --allow-unauthenticated \
   --memory 2Gi \
   --timeout 900 \
-  --set-env-vars RAG_ENGINE_URL="$RAG_ENGINE_URL",AUTHENTICATION_ENABLED=false \
+  --set-env-vars RAG_ENGINE_URL="$RAG_ENGINE_URL",AUTHENTICATION_ENABLED=false,SERVICE_ACCOUNT_EMAIL="$SERVICE_ACCOUNT",FIREBASE_SERVICE_ACCOUNT_PATH="/secrets/service_account.json" \
+  --set-secrets /secrets/service_account.json=firebase-service-account-key:latest \
   --set-secrets OPENAI_API_KEY=OPENAI_API_KEY:latest \
   --set-secrets GOOGLE_API_KEY=GEMINI_API_KEY:latest \
   --set-secrets DATABASE_URL=DATABASE_URL:latest

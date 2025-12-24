@@ -37,8 +37,44 @@ class AnalyticsService:
         }
 
     def get_user_stats(self, user_id: int) -> Dict[str, Any]:
-        quiz_count = self.repo.get_user_quiz_count(user_id)
+        """Get comprehensive user stats (General Stats)"""
+        base_stats = self.repo.get_comprehensive_user_stats(user_id)
+        
+        # Add basic activity metrics
+        activity = self.repo.get_user_activity_metrics(user_id)
+        base_stats.update({
+            "current_streak": activity.get("streak_days", 0),
+            "total_active_days": activity.get("total_active_days", 0)
+        })
+        
+        return base_stats
+
+    def get_law_stats(self, user_id: str) -> Dict[str, Any]:
+        """Get stats for law section with subject breakdown"""
+        # Get aggregate stats
+        aggregate = self.repo.get_law_quiz_stats(user_id)
+        # Get detailed breakdown
+        details = self.repo.get_detailed_law_stats(user_id)
+        
+        aggregate.update(details)
+        return aggregate
+
+    def get_library_stats(self, user_id: str) -> Dict[str, Any]:
+        """Get library usage stats"""
+        return self.repo.get_library_stats(user_id)
+
+    def get_user_activity_metrics(self, user_id: str) -> Dict[str, Any]:
+        return self.repo.get_user_activity_metrics(user_id)
+
+    def get_mastery_stats(self, user_id: str) -> Dict[str, Any]:
+        mastery = self.repo.get_concept_mastery_stats(user_id)
+        
+        # Identify weak and strong subjects (top 3 and bottom 3)
+        strong = [m["concept_name"] for m in mastery[:3] if m["mastery_percentage"] >= 70]
+        weak = [m["concept_name"] for m in mastery[-3:] if m["mastery_percentage"] < 50]
+        
         return {
-            "user_id": user_id,
-            "total_quizzes_completed": quiz_count
+            "concepts": mastery,
+            "weak_subjects": weak,
+            "strong_subjects": strong
         }

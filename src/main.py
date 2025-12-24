@@ -79,7 +79,7 @@ logger = structlog.get_logger(__name__)
 async def lifespan(app: FastAPI):
     # Startup
     apply_logging_preferences(settings)
-    logger.info("Starting AI Video Tutor API", version="0.1.0")
+    logger.info("Starting Parkho AI API", version="0.1.0")
     try:
         create_tables()
         logger.info("Database tables created/verified")
@@ -89,13 +89,13 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    logger.info("Shutting down AI Video Tutor API")
+    logger.info("Shutting down Parkho AI API")
 
 
 def create_application() -> FastAPI:
     app = FastAPI(
-        title="AI Video Tutor",
-        description="Multi-agent system for learning through videos by summarizing them and forming questions from them",
+        title="Parkho AI",
+        description="AI-powered legal education platform with RAG-based legal assistant, document analysis, and intelligent question generation",
         version="0.1.0",
         docs_url="/docs",
         redoc_url="/redoc",

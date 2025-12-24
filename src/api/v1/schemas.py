@@ -322,6 +322,14 @@ class RAGFileDetail(BaseModel):
     file_type: Optional[str] = None
     file_size: int
     upload_date: str
+    indexing_status: Optional[str] = "pending"
+
+
+class CollectionStatusResponse(BaseModel):
+    collection_id: str
+    name: str
+    files: List[RAGFileDetail]
+    status: str = "success"
 
 
 class RAGCollectionFilesResponse(BaseModel):
@@ -345,6 +353,17 @@ class RAGQueryResponse(BaseModel):
     status: str
     message: Optional[str] = None # Added message
     body: Optional[Dict[str, Any]] = None
+
+class CollectionChatRequest(BaseModel):
+    query: str
+    answer_style: str = "detailed"
+    max_chunks: int = 5
+
+class CollectionSummaryResponse(BaseModel):
+    summary: str
+    processing_time_ms: Optional[int] = 0
+    collection_id: Optional[str] = None
+    chunks_analyzed: Optional[int] = None
 
 
 class RAGEmbedding(BaseModel):
@@ -416,9 +435,11 @@ class SourceChunk(BaseModel):
     concepts: List[str] = []
 
 class QueryResponse(BaseModel):
-    success: bool
     answer: str
-    sources: Optional[List[SourceChunk]] = None
+    confidence: float = 0.0
+    is_relevant: bool = False
+    chunks: List[Any] = Field(default_factory=list)
+    critic: Optional[Any] = None
 
 # Retrieve works same as Query but chunks only. 
 # Reusing schemas where possible but keeping distinct if needed.
@@ -565,22 +586,20 @@ class HealthCheckResponse(BaseModel):
 # LEGAL RAG ENGINE SCHEMAS (for /law/chat, /questions/generate, /retrieve)
 # =============================================================================
 
-# Legal Question Types (as documented in BACKEND_API_INTEGRATION.md)
-class LegalQuestionType(str, Enum):
-    ASSERTION_REASONING = "assertion_reasoning"
-    MATCH_FOLLOWING = "match_following"
-    COMPREHENSION = "comprehension"
+# Legal Question Types - Flexible string to pass through to RAG
+# Common types: "mcq", "assertion_reasoning", "match_following", "comprehension"
+# This is intentionally NOT an Enum to allow RAG to define new types without backend changes
 
 
-class LegalDifficultyLevel(str, Enum):
-    EASY = "easy"
-    MODERATE = "moderate"
-    DIFFICULT = "difficult"
+# Legal Difficulty Levels - Flexible string to pass through to RAG
+# Common levels: "easy", "moderate", "difficult"
+LegalDifficultyLevel = str
 
 
 # Law Chat Endpoint Schemas (/law/chat)
 class LawChatRequest(BaseModel):
     question: str = Field(..., min_length=10, max_length=500, description="Legal question (10-500 chars)")
+    enable_rag: bool = Field(default=True, description="If True, use RAG with all legal documents. If False, use direct LLM with legal system prompt")
 
 
 class LawSource(BaseModel):
@@ -596,7 +615,7 @@ class LawChatResponse(BaseModel):
 
 # Legal Question Generation Schemas (/questions/generate)
 class LegalQuestionSpec(BaseModel):
-    type: LegalQuestionType
+    type: str = Field(..., description="Question type (e.g., 'mcq', 'assertion_reasoning', 'match_following', 'comprehension')")
     difficulty: LegalDifficultyLevel
     count: int = Field(..., ge=1, le=10, description="Number of questions (1-10)")
     filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters like collection_ids")
@@ -672,10 +691,59 @@ class LegalQuestionStats(BaseModel):
 class LegalQuestionResponse(BaseModel):
     success: bool
     total_generated: int
+    attempt_id: Optional[int] = None
     questions: List[LegalQuestion]
     generation_stats: LegalQuestionStats
     errors: List[str] = Field(default=[])
     warnings: List[str] = Field(default=[])
+
+
+# =============================================================================
+# NEW LEGAL QUIZ APIS - CUSTOM AND MOCK QUIZ
+# =============================================================================
+
+# Custom Quiz - User specifies question types and counts
+class CustomQuestionSpec(BaseModel):
+    type: str = Field(..., description="Question type (e.g., 'mcq', 'assertion_reasoning', 'match_following', 'comprehension')")
+    count: int = Field(..., ge=1, le=10, description="Number of questions (1-10)")
+
+class CustomQuizRequest(BaseModel):
+    questions: List[CustomQuestionSpec]
+    difficulty: LegalDifficultyLevel = Field(default="moderate", description="Overall difficulty level")
+    subject: Optional[str] = Field(default="Constitutional Law", description="Subject context")
+    scope: List[str] = Field(default=["constitution"], description="Scope: constitution, bns, or both")
+    filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters like collection_ids")
+    include_answers: bool = Field(default=False, description="If True, include answers in response. If False, only return questions for quiz-taking")
+
+# Mock Quiz - System generates random mix with equal distribution
+class MockQuizRequest(BaseModel):
+    total_questions: int = Field(..., ge=3, le=50, description="Total questions for mock quiz (3-50, must be divisible by 3)")
+    subject: Optional[str] = Field(default="Constitutional Law", description="Subject context")
+    scope: List[str] = Field(default=["constitution"], description="Scope: constitution, bns, or both")
+    filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters like collection_ids")
+    include_answers: bool = Field(default=False, description="If True, include answers in response. If False, only return questions for quiz-taking")
+
+    @field_validator('total_questions')
+    @classmethod
+    def validate_total_questions(cls, v):
+        if v % 3 != 0:
+            raise ValueError('total_questions must be divisible by 3 for equal distribution')
+        return v
+
+# Enhanced response for both new APIs
+class QuizGenerationResponse(BaseModel):
+    success: bool
+    total_generated: int
+    total_requested: int
+    attempt_id: Optional[int] = None
+    questions: List[LegalQuestion]
+    generation_stats: LegalQuestionStats
+    quiz_metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional quiz metadata")
+    errors: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+# Alias for standard QuestionGenerationResponse
+QuestionGenerationResponse = QuizGenerationResponse
 
 
 # Legal Content Retrieval Schemas (/retrieve)
@@ -698,3 +766,216 @@ class LegalChunk(BaseModel):
 class LegalRetrieveResponse(BaseModel):
     success: bool
     results: List[LegalChunk]
+
+
+# =============================================================================
+# PYQ (Previous Year Questions) SCHEMAS
+# =============================================================================
+
+# Base PYQ Schemas
+class ExamPaperSummary(BaseModel):
+    id: int
+    title: str
+    year: int
+    exam_name: str
+    total_questions: int
+    total_marks: float
+    time_limit_minutes: int
+    display_name: str
+    description: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class ExamPaperDetail(BaseModel):
+    id: int
+    title: str
+    year: int
+    exam_name: str
+    total_questions: int
+    total_marks: float
+    time_limit_minutes: int
+    display_name: str
+    description: Optional[str] = None
+    questions: Optional[List[Dict[str, Any]]] = None
+    created_at: Optional[str] = None
+
+
+class PaperListStats(BaseModel):
+    total_papers: int
+    available_years: List[int]
+    available_exams: List[str]
+    year_range: Dict[str, Optional[int]]
+
+
+class PaperListResponse(BaseModel):
+    papers: List[ExamPaperSummary]
+    summary: PaperListStats
+    pagination: Dict[str, int]
+
+
+# Exam Attempt Schemas
+class StartAttemptResponse(BaseModel):
+    attempt_id: int
+    paper_id: int
+    paper_title: str
+    exam_name: str
+    year: int
+    total_questions: int
+    total_marks: float
+    time_limit_minutes: int
+    started_at: Optional[str] = None
+    questions: List[Dict[str, Any]]
+
+
+class ExamAnswers(BaseModel):
+    answers: Dict[str, str] = Field(..., description="Mapping of question_id to selected_answer")
+
+
+class QuestionResult(BaseModel):
+    question_id: str
+    question_text: str
+    correct_answer: str
+    user_answer: Optional[str] = None
+    is_correct: bool
+    is_attempted: bool
+    explanation: Optional[str] = None
+    marks: float
+
+
+class AttemptDetailedResults(BaseModel):
+    attempt_id: int
+    paper_id: int
+    score: Optional[float] = None
+    percentage: Optional[float] = None
+    total_marks: float
+    time_taken_seconds: Optional[int] = None
+    started_at: Optional[str] = None
+    submitted_at: Optional[str] = None
+    question_results: List[QuestionResult]
+
+
+class PaperInfo(BaseModel):
+    id: int
+    title: str
+    exam_name: str
+    year: int
+
+
+class SubmitAttemptResponse(BaseModel):
+    attempt_id: int
+    submitted: bool
+    score: Optional[float] = None
+    total_marks: float
+    percentage: Optional[float] = None
+    time_taken_seconds: Optional[int] = None
+    display_time: str
+    submitted_at: Optional[str] = None
+    paper_info: PaperInfo
+    detailed_results: AttemptDetailedResults
+
+
+class AttemptResultsResponse(BaseModel):
+    attempt_id: int
+    score: Optional[float] = None
+    total_marks: float
+    percentage: Optional[float] = None
+    time_taken_seconds: Optional[int] = None
+    display_time: str
+    started_at: Optional[str] = None
+    submitted_at: Optional[str] = None
+    paper_info: PaperInfo
+    detailed_results: AttemptDetailedResults
+
+
+# User History Schemas
+class AttemptSummary(BaseModel):
+    attempt_id: int
+    paper_id: int
+    paper_title: str
+    exam_name: str
+    year: Optional[int] = None
+    score: Optional[float] = None
+    total_marks: float
+    percentage: Optional[float] = None
+    time_taken_seconds: Optional[int] = None
+    display_time: str
+    is_completed: bool
+    started_at: Optional[str] = None
+    submitted_at: Optional[str] = None
+
+
+class UserPerformanceStats(BaseModel):
+    total_attempts: int
+    completed_attempts: int
+    completion_rate: float
+    average_score: float
+    average_percentage: float
+    best_score: float
+    best_percentage: float
+    average_time_seconds: int
+
+
+class UserHistoryResponse(BaseModel):
+    attempts: List[AttemptSummary]
+    performance_stats: UserPerformanceStats
+    pagination: Dict[str, int]
+
+
+class PaperPerformanceStats(BaseModel):
+    paper_id: int
+    total_attempts: int
+    completed_attempts: int
+    completion_rate: float
+    average_score: float
+    average_percentage: float
+    highest_score: float
+    lowest_score: float
+    score_std_deviation: float
+
+
+class PaperStatsResponse(BaseModel):
+    paper_id: int
+    paper_title: str
+    exam_name: str
+    year: int
+    statistics: PaperPerformanceStats
+
+
+class AvailableFiltersResponse(BaseModel):
+    years: List[int]
+    exam_names: List[str]
+
+
+# PDF Parsing Schemas (for admin/dev data ingestion)
+class ParsePDFRequest(BaseModel):
+    url: str = Field(..., description="URL of the PDF to parse")
+    title: Optional[str] = Field(None, description="Optional exam title")
+    year: Optional[int] = Field(None, description="Optional exam year")
+    exam_name: Optional[str] = Field(None, description="Optional exam name")
+    time_limit_minutes: Optional[int] = Field(180, description="Time limit in minutes")
+
+
+class ParsePDFResponse(BaseModel):
+    success: bool
+    parsed_data: Dict[str, Any] = Field(..., description="Parsed exam paper data")
+    questions_found: int
+    total_marks: float
+    message: str
+
+
+class ImportPaperRequest(BaseModel):
+    url: str = Field(..., description="URL of the PDF to parse and import")
+    title: Optional[str] = Field(None, description="Optional exam title")
+    year: Optional[int] = Field(None, description="Optional exam year")
+    exam_name: Optional[str] = Field(None, description="Optional exam name")
+    time_limit_minutes: Optional[int] = Field(180, description="Time limit in minutes")
+    activate: bool = Field(True, description="Whether to activate the paper immediately")
+
+
+class ImportPaperResponse(BaseModel):
+    success: bool
+    paper_id: int
+    title: str
+    questions_imported: int
+    total_marks: float
+    message: str
