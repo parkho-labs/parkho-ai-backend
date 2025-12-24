@@ -6,7 +6,7 @@ from typing import Dict, Any, List
 
 from ..agents.content_workflow import ContentWorkflow
 from ..config import get_settings
-from ..services.rag_client import rag_client
+from ..services.rag import core_rag_client as rag_client
 from ..core.database import SessionLocal
 from ..models.content_job import ContentJob
 

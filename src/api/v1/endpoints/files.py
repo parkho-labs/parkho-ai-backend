@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_current_user_conditional, get_db, get_file_storage, get_gcp_service
 from src.services.file_storage import FileStorageService
-from src.services.rag_client import rag_client, RagClient
+from src.services.rag import core_rag_client as rag_client, CoreRagClient as RagClient
 from src.models.user import User
 from src.models.uploaded_file import UploadedFile
 from src.api.v1.schemas import (

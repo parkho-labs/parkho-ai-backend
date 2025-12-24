@@ -8,22 +8,25 @@ Business-focused frontend API that uses RagQuestionGeneratorService internally.
 import structlog
 import uuid
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
-from typing import Dict, Any
+from fastapi import APIRouter, HTTPException, Depends, Query, Path as PathParam
+from typing import Dict, Any, List, Optional
+from sqlalchemy.orm import Session
+import json
 
-from src.services.rag_question_generator_service import RagQuestionGeneratorService
 from src.api.v1.schemas import (
     LegalQuestionRequest,
     LegalQuestionResponse,
     LegalQuestion,
     LegalQuestionMetadata,
     LegalQuestionStats,
-    # New schemas for enhanced quiz APIs
     CustomQuizRequest,
     MockQuizRequest,
     QuizGenerationResponse,
-    CustomQuestionSpec
+    CustomQuestionSpec,
+    ExamAnswers,
+    SubmitAttemptResponse
 )
+from src.core.database import get_db
 
 logger = structlog.get_logger(__name__)
 
@@ -31,7 +34,11 @@ router = APIRouter()
 
 
 @router.post("/generate-quiz", response_model=LegalQuestionResponse)
-async def generate_legal_questions(request: LegalQuestionRequest) -> LegalQuestionResponse:
+async def generate_legal_questions(
+    request: LegalQuestionRequest,
+    user_id: str = Query("anonymous", description="User identifier"),
+    db: Session = Depends(get_db)
+) -> LegalQuestionResponse:
     """
     Generate exam-style questions for legal education.
 
@@ -82,8 +89,8 @@ async def generate_legal_questions(request: LegalQuestionRequest) -> LegalQuesti
             rag_questions.append(rag_question)
 
         # Use legal-specific RAG client method to call /law/questions
-        from src.api.dependencies import get_rag_client
-        rag_client = get_rag_client()
+        from src.api.dependencies import get_law_rag_client
+        rag_client = get_law_rag_client()
         generation_start = datetime.now()
 
         context = {"subject": request.context.subject if request.context else "Constitutional Law"}
@@ -152,11 +159,33 @@ async def generate_legal_questions(request: LegalQuestionRequest) -> LegalQuesti
             warnings=rag_response_data.get("warnings", [])
         )
 
+        # Record attempt in database
+        try:
+            from src.models.user_attempt import UserAttempt
+            attempt = UserAttempt(
+                user_identifier=user_id,
+                total_marks=len(legal_questions),
+                started_at=datetime.now()
+            )
+            # Store questions in meta for scoring later
+            attempt.answers = json.dumps({
+                "quiz_type": "legal",
+                "subject": request.context.subject if request.context else "Constitutional Law",
+                "questions": [q.dict() for q in legal_questions]
+            })
+            db.add(attempt)
+            db.commit()
+            db.refresh(attempt)
+            response.attempt_id = attempt.id
+        except Exception as e:
+            logger.error("Failed to record legal quiz attempt", error=str(e))
+
         logger.info(
             "Legal question generation completed",
             total_requested=total_requested,
             total_generated=response.total_generated,
-            generation_time=generation_time
+            generation_time=generation_time,
+            attempt_id=response.attempt_id
         )
 
         return response
@@ -172,7 +201,11 @@ async def generate_legal_questions(request: LegalQuestionRequest) -> LegalQuesti
 
 
 @router.post("/custom-quiz", response_model=QuizGenerationResponse)
-async def generate_custom_quiz(request: CustomQuizRequest) -> QuizGenerationResponse:
+async def generate_custom_quiz(
+    request: CustomQuizRequest,
+    user_id: str = Query("anonymous"),
+    db: Session = Depends(get_db)
+) -> QuizGenerationResponse:
     """
     Generate custom quiz where user specifies exact question types and counts.
 
@@ -226,8 +259,8 @@ async def generate_custom_quiz(request: CustomQuizRequest) -> QuizGenerationResp
             rag_questions.append(rag_question)
 
         # Use legal-specific RAG client method to call /law/questions
-        from src.api.dependencies import get_rag_client
-        rag_client = get_rag_client()
+        from src.api.dependencies import get_law_rag_client
+        rag_client = get_law_rag_client()
         generation_start = datetime.now()
 
         context = {"subject": request.subject}
@@ -312,12 +345,34 @@ async def generate_custom_quiz(request: CustomQuizRequest) -> QuizGenerationResp
             warnings=rag_response_data.get("warnings", [])
         )
 
+        # Record attempt in database
+        try:
+            from src.models.user_attempt import UserAttempt
+            attempt = UserAttempt(
+                user_identifier=user_id,
+                total_marks=len(legal_questions),
+                started_at=datetime.now()
+            )
+            attempt.answers = json.dumps({
+                "quiz_type": "custom",
+                "subject": request.subject,
+                "scope": request.scope,
+                "questions": [q.dict() for q in legal_questions]
+            })
+            db.add(attempt)
+            db.commit()
+            db.refresh(attempt)
+            response.attempt_id = attempt.id
+        except Exception as e:
+            logger.error("Failed to record custom quiz attempt", error=str(e))
+
         logger.info(
             "Custom quiz generation completed",
             total_requested=total_requested,
             total_generated=response.total_generated,
             generation_time=generation_time,
-            quiz_type="custom"
+            quiz_type="custom",
+            attempt_id=response.attempt_id
         )
 
         return response
@@ -333,49 +388,28 @@ async def generate_custom_quiz(request: CustomQuizRequest) -> QuizGenerationResp
 
 
 @router.post("/mock-quiz", response_model=QuizGenerationResponse)
-async def generate_mock_quiz(request: MockQuizRequest) -> QuizGenerationResponse:
+async def generate_mock_quiz(
+    request: MockQuizRequest,
+    user_id: str = Query("anonymous"),
+    db: Session = Depends(get_db)
+) -> QuizGenerationResponse:
     """
     Generate mock quiz with automatic equal distribution of question types and mixed difficulties.
-
-    Endpoint: POST /api/v1/legal/mock-quiz
-
-    Request Body:
-        total_questions: Total number of questions (must be divisible by 3 for equal distribution)
-        subject: Subject context (default: "Constitutional Law")
-        scope: Content scope - ["constitution"], ["bns"], or both
-        filters: Optional filters like collection_ids
-
-    Response:
-        success: Boolean success status
-        total_generated: Number of questions actually generated
-        total_requested: Number of questions requested
-        questions: List of generated questions with metadata
-        generation_stats: Statistics about the generation process
-        quiz_metadata: Additional metadata about the quiz including distribution details
-
-    Auto-Distribution Logic:
-        - Question types: Equal split (33% each of assertion_reasoning, match_following, comprehension)
-        - Difficulty levels: Equal split (33% easy, 33% moderate, 33% difficult)
     """
     try:
         logger.info("Processing mock quiz generation request", total_questions=request.total_questions)
 
         # Calculate automatic distribution
         questions_per_type = request.total_questions // 3
-
-        # Define question types in order
         question_types = ["assertion_reasoning", "match_following", "comprehension"]
-        # Use single difficulty for simplicity - RAG engine seems to prefer this
         default_difficulty = "moderate"
 
-        # Create distributed question specs
         rag_questions = []
         total_requested = request.total_questions
 
         type_distribution = {}
         difficulty_distribution = {}
 
-        # Distribute questions equally across types with single difficulty
         for question_type in question_types:
             rag_question = {
                 "type": question_type,
@@ -384,14 +418,11 @@ async def generate_mock_quiz(request: MockQuizRequest) -> QuizGenerationResponse
                 "filters": request.filters or {"collection_ids": ["constitution-golden-source"]}
             }
             rag_questions.append(rag_question)
-
-            # Track distribution
             type_distribution[question_type] = questions_per_type
             difficulty_distribution[default_difficulty] = difficulty_distribution.get(default_difficulty, 0) + questions_per_type
 
-        # Use legal-specific RAG client method to call /law/questions
-        from src.api.dependencies import get_rag_client
-        rag_client = get_rag_client()
+        from src.api.dependencies import get_law_rag_client
+        rag_client = get_law_rag_client()
         generation_start = datetime.now()
 
         context = {"subject": request.subject}
@@ -424,14 +455,12 @@ async def generate_mock_quiz(request: MockQuizRequest) -> QuizGenerationResponse
                 warnings=rag_response_data.get("warnings", [])
             )
 
-        # Transform RAG response to legal format
         legal_questions = []
         actual_type_counts = {}
         actual_difficulty_counts = {}
 
         questions_data = rag_response_data.get("questions", [])
         for question_data in questions_data:
-            # Generate legal question metadata
             metadata = LegalQuestionMetadata(
                 question_id=str(uuid.uuid4()),
                 type=question_data.get("metadata", {}).get("type", "unknown"),
@@ -440,18 +469,14 @@ async def generate_mock_quiz(request: MockQuizRequest) -> QuizGenerationResponse
                 source_files=question_data.get("metadata", {}).get("source_files", []),
                 generated_at=datetime.now().isoformat()
             )
-
-            # Count actual distribution
             actual_type_counts[metadata.type] = actual_type_counts.get(metadata.type, 0) + 1
             actual_difficulty_counts[metadata.difficulty] = actual_difficulty_counts.get(metadata.difficulty, 0) + 1
-
             legal_question = LegalQuestion(
                 metadata=metadata,
                 content=question_data.get("content", {})
             )
             legal_questions.append(legal_question)
 
-        # Build generation stats
         generation_stats = LegalQuestionStats(
             total_requested=total_requested,
             by_type=actual_type_counts,
@@ -460,7 +485,6 @@ async def generate_mock_quiz(request: MockQuizRequest) -> QuizGenerationResponse
             generation_time=generation_time
         )
 
-        # Calculate distribution effectiveness
         distribution_effectiveness = {}
         for q_type in question_types:
             intended = type_distribution.get(q_type, 0)
@@ -490,15 +514,35 @@ async def generate_mock_quiz(request: MockQuizRequest) -> QuizGenerationResponse
             warnings=rag_response_data.get("warnings", [])
         )
 
+        try:
+            from src.models.user_attempt import UserAttempt
+            attempt = UserAttempt(
+                user_identifier=user_id,
+                total_marks=len(legal_questions),
+                started_at=datetime.now()
+            )
+            attempt.answers = json.dumps({
+                "quiz_type": "mock",
+                "subject": request.subject,
+                "scope": request.scope,
+                "questions": [q.dict() for q in legal_questions]
+            })
+            db.add(attempt)
+            db.commit()
+            db.refresh(attempt)
+            response.attempt_id = attempt.id
+        except Exception as e:
+            logger.error("Failed to record mock quiz attempt", error=str(e))
+
         logger.info(
             "Mock quiz generation completed",
             total_requested=total_requested,
             total_generated=response.total_generated,
             generation_time=generation_time,
             quiz_type="mock",
+            attempt_id=response.attempt_id,
             distribution_effectiveness=distribution_effectiveness
         )
-
         return response
 
     except HTTPException:
@@ -509,3 +553,101 @@ async def generate_mock_quiz(request: MockQuizRequest) -> QuizGenerationResponse
             status_code=500,
             detail=f"Failed to generate mock quiz: {str(e)}"
         )
+
+
+@router.post("/attempts/{attempt_id}/submit", response_model=SubmitAttemptResponse)
+async def submit_legal_quiz(
+    attempt_id: int = PathParam(..., description="Quiz attempt ID"),
+    answers: ExamAnswers = None,
+    db: Session = Depends(get_db)
+) -> SubmitAttemptResponse:
+    """
+    Submit answers for a generated legal quiz and get score.
+    """
+    try:
+        from src.models.user_attempt import UserAttempt
+        
+        attempt = db.query(UserAttempt).filter(UserAttempt.id == attempt_id).first()
+        if not attempt:
+            raise HTTPException(status_code=404, detail="Attempt not found")
+        
+        if attempt.is_submitted:
+            raise HTTPException(status_code=400, detail="Already submitted")
+            
+        data = json.loads(attempt.answers) if attempt.answers else {}
+        questions = data.get("questions", [])
+        
+        correct_count = 0
+        question_results = []
+        submitted_answers = answers.answers if answers else {}
+        
+        for q in questions:
+            q_metadata = q.get("metadata", {})
+            q_id = q_metadata.get("question_id")
+            q_content = q.get("content", {})
+            correct_ans = q_content.get("correct_option") or q_content.get("correct_matches")
+            
+            user_ans = submitted_answers.get(q_id)
+            is_correct = False
+            if isinstance(correct_ans, dict):
+                 is_correct = str(user_ans) == str(correct_ans)
+            else:
+                 is_correct = str(user_ans).strip().upper() == str(correct_ans).strip().upper() if user_ans else False
+            
+            if is_correct:
+                correct_count += 1
+                
+            question_results.append({
+                "question_id": str(q_id),
+                "question_text": q_content.get("question_text", ""),
+                "correct_answer": str(correct_ans),
+                "user_answer": str(user_ans) if user_ans else None,
+                "is_correct": is_correct,
+                "is_attempted": user_ans is not None,
+                "marks": 1.0
+            })
+            
+        attempt.score = float(correct_count)
+        attempt.total_marks = float(len(questions))
+        attempt.percentage = (attempt.score / attempt.total_marks * 100) if attempt.total_marks > 0 else 0
+        attempt.is_submitted = True
+        attempt.is_completed = True
+        attempt.submitted_at = datetime.now()
+        
+        if attempt.started_at:
+            attempt.time_taken_seconds = int((attempt.submitted_at - attempt.started_at).total_seconds())
+            
+        data["submitted_answers"] = submitted_answers
+        data["detailed_results"] = {"question_results": question_results}
+        attempt.answers = json.dumps(data)
+        
+        db.commit()
+        db.refresh(attempt)
+        
+        return SubmitAttemptResponse(
+            attempt_id=attempt.id,
+            submitted=True,
+            score=attempt.score,
+            total_marks=attempt.total_marks,
+            percentage=attempt.percentage,
+            time_taken_seconds=attempt.time_taken_seconds,
+            display_time=attempt.display_time_taken,
+            submitted_at=attempt.submitted_at.isoformat(),
+            paper_info={
+                "id": 0,
+                "title": f"Quiz: {data.get('subject', 'Legal')}",
+                "exam_name": "Legal Education",
+                "year": datetime.now().year
+            },
+            detailed_results={
+                "attempt_id": attempt.id,
+                "paper_id": 0,
+                "score": attempt.score,
+                "total_marks": attempt.total_marks,
+                "percentage": attempt.percentage,
+                "question_results": question_results
+            }
+        )
+    except Exception as e:
+        logger.error("Submit legal quiz failed", (str(e)))
+        raise HTTPException(status_code=500, detail=str(e))

@@ -42,3 +42,22 @@ class AnalyticsService:
             "user_id": user_id,
             "total_quizzes_completed": quiz_count
         }
+
+    def get_law_stats(self, user_id: str) -> Dict[str, Any]:
+        return self.repo.get_law_quiz_stats(user_id)
+
+    def get_user_activity_metrics(self, user_id: str) -> Dict[str, Any]:
+        return self.repo.get_user_activity_metrics(user_id)
+
+    def get_mastery_stats(self, user_id: str) -> Dict[str, Any]:
+        mastery = self.repo.get_concept_mastery_stats(user_id)
+        
+        # Identify weak and strong subjects (top 3 and bottom 3)
+        strong = [m["concept_name"] for m in mastery[:3] if m["mastery_percentage"] >= 70]
+        weak = [m["concept_name"] for m in mastery[-3:] if m["mastery_percentage"] < 50]
+        
+        return {
+            "concepts": mastery,
+            "weak_subjects": weak,
+            "strong_subjects": strong
+        }

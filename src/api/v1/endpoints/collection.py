@@ -22,7 +22,11 @@ from src.api.v1.schemas import (
     FileUploadUrlRequest,
     PresignedUrlResponse,
     FileConfirmRequest,
-    RAGFileUploadResponse
+    RAGFileUploadResponse,
+    CollectionChatRequest,
+    CollectionSummaryResponse,
+    QueryResponse,
+    QuestionGenerationResponse
 )
 from src.api.v1.constants import RAGStatus, RAGIndexingStatus, StorageConfig
 import datetime
@@ -345,4 +349,61 @@ async def query_collection(
         raise
     except Exception as e:
         logger.error("Failed to query collection", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{collection_id}/chat", response_model=QueryResponse)
+async def chat_with_collection(
+    collection_id: str,
+    request: CollectionChatRequest,
+    current_user: User = Depends(get_current_user_conditional),
+    service: CollectionService = Depends(get_collection_service)
+):
+    """Restricted-context chat with collection"""
+    try:
+        result = await service.chat_collection(
+            current_user.user_id, 
+            collection_id, 
+            request.query,
+            request.answer_style,
+            request.max_chunks
+        )
+        return QueryResponse(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Collection chat failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{collection_id}/summary", response_model=CollectionSummaryResponse)
+async def summarize_collection(
+    collection_id: str,
+    current_user: User = Depends(get_current_user_conditional),
+    service: CollectionService = Depends(get_collection_service)
+):
+    """Professional & Educational summary of collection content"""
+    try:
+        result = await service.summary_collection(current_user.user_id, collection_id)
+        return CollectionSummaryResponse(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Collection summary failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{collection_id}/quiz")
+async def generate_collection_quiz(
+    collection_id: str,
+    num_questions: int = 10,
+    difficulty: str = "moderate",
+    current_user: User = Depends(get_current_user_conditional),
+    service: CollectionService = Depends(get_collection_service)
+):
+    """Generate quiz from collection content with mixed question types"""
+    try:
+        result = await service.quiz_collection(current_user.user_id, collection_id, num_questions, difficulty)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Collection quiz generation failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))

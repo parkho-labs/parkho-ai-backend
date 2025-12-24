@@ -12,7 +12,7 @@ from ...services.llm_service import LLMService
 from ...utils.database_utils import DatabaseService
 from ...utils.validation_utils import validate_job_exists
 from ...exceptions import WorkflowError
-from ...services.rag_client import rag_client, RagQueryRequest
+from ...services.rag import core_rag_client as rag_client, RagQueryRequest
 from ...config import get_settings
 import time
 

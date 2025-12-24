@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
 
     api_host: str = Field(default="localhost", description="API host")
-    api_port: int = Field(default=8000, description="API port")
+    api_port: int = Field(default=8080, description="API port")
     debug: bool = Field(default=False, description="Debug mode")
 
     # Authentication Configuration
@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     use_secret_manager: bool = Field(default=False, description="Use Secret Manager for API keys")
 
     # RAG Engine Configuration
-    rag_engine_url: str = Field(default="https://rag-engine-api-722723826302.asia-south2.run.app/api/v1", description="RAG Engine API base URL")
+    rag_engine_url: str = Field(default="http://localhost:8000/api/v1", description="RAG Engine API base URL")
     rag_questions_timeout: float = Field(default=60.0, description="Timeout for RAG question generation requests in seconds")
 
     # Analytics Dashboard Configuration

@@ -217,8 +217,8 @@ async def get_user_stats(
     return {
         "papers_attempted": papers_attempted,
         "completed": completed,
-        "best_score": int(round(best_score)) if best_score else 0,
-        "average_score": int(round(average_score)) if average_score else 0,
+        "best_score": int(round(best_score)),
+        "average_score": int(round(average_score)),
         "day_streak": day_streak
     }
 

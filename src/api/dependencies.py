@@ -16,7 +16,14 @@ from ..services.analytics_service import AnalyticsService
 from ..services.analytics_dashboard_service import get_analytics_dashboard_service, AnalyticsDashboardService
 from ..services.llm_service import LLMService
 from ..services.collection_service import CollectionService
-from ..services.rag_client import rag_client, RagClient
+from ..services.rag import (
+    core_rag_client as rag_client, 
+    CoreRagClient as RagClient, 
+    law_rag_client, 
+    library_rag_client,
+    LawRagClient,
+    LibraryRagClient
+)
 from ..services.gcp_service import GCPService
 from ..api.v1.constants import RAGIndexingStatus, StorageConfig, ErrorConstants
 from ..models.user import User
@@ -77,11 +84,18 @@ def get_gcp_service() -> GCPService:
 def get_rag_client() -> RagClient:
     return rag_client
 
+def get_law_rag_client() -> LawRagClient:
+    return law_rag_client
+
+def get_library_rag_client() -> LibraryRagClient:
+    return library_rag_client
+
 def get_collection_service(
     repo: CollectionRepository = Depends(get_collection_repository)
 ) -> CollectionService:
-    rag_client = get_rag_client()
-    return CollectionService(repo, rag_client)
+    # Collection service now uses the specialized library client
+    client = get_library_rag_client()
+    return CollectionService(repo, client)
 
 
 async def get_current_user_required(

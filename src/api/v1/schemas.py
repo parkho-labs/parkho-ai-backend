@@ -346,6 +346,17 @@ class RAGQueryResponse(BaseModel):
     message: Optional[str] = None # Added message
     body: Optional[Dict[str, Any]] = None
 
+class CollectionChatRequest(BaseModel):
+    query: str
+    answer_style: str = "detailed"
+    max_chunks: int = 5
+
+class CollectionSummaryResponse(BaseModel):
+    summary: str
+    processing_time_ms: int
+    collection_id: Optional[str] = None
+    chunks_analyzed: Optional[int] = None
+
 
 class RAGEmbedding(BaseModel):
     text: str
@@ -416,9 +427,11 @@ class SourceChunk(BaseModel):
     concepts: List[str] = []
 
 class QueryResponse(BaseModel):
-    success: bool
     answer: str
-    sources: Optional[List[SourceChunk]] = None
+    confidence: float = 0.0
+    is_relevant: bool = False
+    chunks: List[Any] = Field(default_factory=list)
+    critic: Optional[Any] = None
 
 # Retrieve works same as Query but chunks only. 
 # Reusing schemas where possible but keeping distinct if needed.
@@ -581,6 +594,7 @@ class LegalDifficultyLevel(str, Enum):
 # Law Chat Endpoint Schemas (/law/chat)
 class LawChatRequest(BaseModel):
     question: str = Field(..., min_length=10, max_length=500, description="Legal question (10-500 chars)")
+    enable_rag: bool = Field(default=True, description="If True, use RAG with all legal documents. If False, use direct LLM with legal system prompt")
 
 
 class LawSource(BaseModel):
@@ -672,6 +686,7 @@ class LegalQuestionStats(BaseModel):
 class LegalQuestionResponse(BaseModel):
     success: bool
     total_generated: int
+    attempt_id: Optional[int] = None
     questions: List[LegalQuestion]
     generation_stats: LegalQuestionStats
     errors: List[str] = Field(default=[])
@@ -713,11 +728,15 @@ class QuizGenerationResponse(BaseModel):
     success: bool
     total_generated: int
     total_requested: int
+    attempt_id: Optional[int] = None
     questions: List[LegalQuestion]
     generation_stats: LegalQuestionStats
     quiz_metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional quiz metadata")
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+
+# Alias for standard QuestionGenerationResponse
+QuestionGenerationResponse = QuizGenerationResponse
 
 
 # Legal Content Retrieval Schemas (/retrieve)

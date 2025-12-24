@@ -35,6 +35,33 @@ async def get_user_stats(
     return analytics.get_user_stats(current_user.user_id)
 
 
+@router.get("/law/stats")
+async def get_law_stats(
+    user_id: str,
+    analytics: AnalyticsService = Depends(get_analytics_service)
+) -> Dict[str, Any]:
+    """Get statistics for law/legal quizzes (generated, correct answers, etc.)"""
+    return analytics.get_law_stats(user_id)
+
+
+@router.get("/user/metrics")
+async def get_user_activity_metrics(
+    user_id: str,
+    analytics: AnalyticsService = Depends(get_analytics_service)
+) -> Dict[str, Any]:
+    """Get user activity metrics (streak, daily login count, etc.)"""
+    return analytics.get_user_activity_metrics(user_id)
+
+
+@router.get("/user/mastery")
+async def get_user_mastery_stats(
+    user_id: str,
+    analytics: AnalyticsService = Depends(get_analytics_service)
+) -> Dict[str, Any]:
+    """Get concept mastery and weak/strong subjects"""
+    return analytics.get_mastery_stats(user_id)
+
+
 @router.get("/quiz/{quiz_id}/performance")
 async def get_quiz_performance(
     quiz_id: int,

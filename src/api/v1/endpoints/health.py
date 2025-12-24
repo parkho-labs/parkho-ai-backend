@@ -33,7 +33,7 @@ async def health_check(
         
         return {
             "status": status,
-            "service": "AI Video Tutor API",
+            "service": "Parkho AI API",
             "version": "0.1.0",
             "environment": "development" if settings.debug else "production",
             "database": db_status,
