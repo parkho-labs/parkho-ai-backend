@@ -91,8 +91,8 @@ class LawRagClient(CoreRagClient):
             total_questions = sum(q["count"] for q in questions_spec)
             question_data = []
             type_mapping = {
-                "assertion_reasoning": "Assertion_reason",
-                "match_following": "Match the following",
+                "assertion_reasoning": "Assertion_Reason",
+                "match_following": "Match the Column",
                 "mcq": "MCQ",
                 "comprehension": "MCQ"
             }

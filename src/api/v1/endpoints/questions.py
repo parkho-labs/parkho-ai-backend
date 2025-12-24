@@ -7,7 +7,7 @@ Business-focused frontend API that uses RagQuestionGeneratorService internally.
 
 import structlog
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, Query, Path as PathParam
 from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
@@ -670,10 +670,15 @@ async def submit_legal_quiz(
         attempt.percentage = (attempt.score / attempt.total_marks * 100) if attempt.total_marks > 0 else 0
         attempt.is_submitted = True
         attempt.is_completed = True
-        attempt.submitted_at = datetime.now()
+        attempt.submitted_at = datetime.now(timezone.utc)
         
         if attempt.started_at:
-            attempt.time_taken_seconds = int((attempt.submitted_at - attempt.started_at).total_seconds())
+            # Ensure started_at is offset-aware for subtraction
+            started_at_aware = attempt.started_at
+            if started_at_aware.tzinfo is None:
+                started_at_aware = started_at_aware.replace(tzinfo=timezone.utc)
+            
+            attempt.time_taken_seconds = int((attempt.submitted_at - started_at_aware).total_seconds())
             
         data["submitted_answers"] = submitted_answers
         data["detailed_results"] = {"question_results": question_results}
@@ -707,5 +712,5 @@ async def submit_legal_quiz(
             }
         )
     except Exception as e:
-        logger.error("Submit legal quiz failed", (str(e)))
+        logger.error("Submit legal quiz failed", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
