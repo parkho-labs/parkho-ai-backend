@@ -177,36 +177,53 @@ async def generate_collection_upload_url(
     """Generate presigned upload URL for file that will be auto-linked to collection"""
     try:
         # Verify collection exists and user has access
-        collections = await service.list_collections(current_user.user_id)
-        collection_exists = any(c.id == collection_id for c in collections)
-        if not collection_exists:
-            raise HTTPException(status_code=404, detail="Collection not found")
+        try:
+            collections = await service.list_collections(current_user.user_id)
+            collection_exists = any(c.id == collection_id for c in collections)
+            if not collection_exists:
+                raise HTTPException(status_code=404, detail="Collection not found")
+        except Exception as e:
+            logger.error("Failed to verify collection access", collection_id=collection_id, error=str(e))
+            raise HTTPException(status_code=500, detail=f"Failed to verify collection: {str(e)}")
 
         # Generate file ID and presigned URL (same as /files/upload-url)
         file_id = str(uuid.uuid4())
         filename = request.filename
         blob_name = f"uploads/{current_user.user_id}/{file_id}/{filename}"
 
-        url = gcp_service.generate_upload_signed_url(
-            blob_name=blob_name,
-            content_type=request.content_type
-        )
+        try:
+            url = gcp_service.generate_upload_signed_url(
+                blob_name=blob_name,
+                content_type=request.content_type
+            )
+        except Exception as e:
+            logger.error("GCP URL generation raised exception", error=str(e))
+            url = None
 
         if not url:
-            raise HTTPException(status_code=500, detail="Failed to generate upload URL")
+            # Check if GCP credentials or bucket might be the issue
+            if not gcp_service.client:
+                detail = "GCP Client not initialized. Check server configuration."
+            else:
+                detail = "Failed to generate upload URL. Check GCS bucket access."
+            raise HTTPException(status_code=500, detail=detail)
 
         public_url = gcp_service.get_public_url(blob_name)
 
         # Create file record (same as /files/upload-url)
-        file_storage.file_repo.create_file(
-            file_id=file_id,
-            filename=request.filename,
-            file_path=public_url,
-            file_size=request.file_size,
-            content_type="FILE",
-            file_type=request.content_type,
-            indexing_status=RAGIndexingStatus.INDEXING_PENDING
-        )
+        try:
+            file_storage.file_repo.create_file(
+                file_id=file_id,
+                filename=request.filename,
+                file_path=public_url,
+                file_size=request.file_size,
+                content_type="FILE",
+                file_type=request.content_type,
+                indexing_status=RAGIndexingStatus.INDEXING_PENDING.value
+            )
+        except Exception as e:
+            logger.error("Failed to create file record in DB", error=str(e))
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
         return PresignedUrlResponse(
             upload_url=url,
