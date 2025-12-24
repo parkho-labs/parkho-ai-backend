@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 
 from ..models.user_event import UserEvent
+from ..models.collection import Collection
+from ..models.uploaded_file import UploadedFile
 
 
 class AnalyticsRepository:
@@ -178,3 +180,111 @@ class AnalyticsRepository:
             })
         
         return sorted(mastery, key=lambda x: x["mastery_percentage"], reverse=True)
+
+    def get_library_stats(self, user_id: str) -> Dict[str, Any]:
+        """Get stats for user's library usage"""
+        # Count collections
+        total_collections = self.session.query(Collection).filter(Collection.user_id == user_id).count()
+        
+        # Get collections to count files
+        collections = self.session.query(Collection).filter(Collection.user_id == user_id).all()
+        
+        total_files = 0
+        total_size_bytes = 0
+        
+        for col in collections:
+            total_files += len(col.files)
+            for f in col.files:
+                total_size_bytes += (f.file_size or 0)
+                
+        return {
+            "total_collections": total_collections,
+            "total_documents": total_files,
+            "total_storage_mb": round(total_size_bytes / (1024 * 1024), 2),
+            "avg_docs_per_collection": round(total_files / total_collections, 1) if total_collections > 0 else 0
+        }
+
+    def get_detailed_law_stats(self, user_id: str) -> Dict[str, Any]:
+        """Get law stats broken down by subject/act"""
+        from ..models.user_attempt import UserAttempt
+        import json
+        
+        attempts = (
+            self.session.query(UserAttempt)
+            .filter(
+                UserAttempt.user_identifier == user_id,
+                UserAttempt.paper_id == None,
+                UserAttempt.answers.contains('subject')
+            ).all()
+        )
+        
+        subject_stats = {}
+        
+        for a in attempts:
+            try:
+                data = json.loads(a.answers) if a.answers else {}
+                subject = data.get("subject", "Uncategorized")
+                
+                if subject not in subject_stats:
+                    subject_stats[subject] = {
+                        "attempts": 0, 
+                        "completed": 0,
+                        "total_questions": 0,
+                        "correct": 0,
+                        "total_score": 0
+                    }
+                
+                stats = subject_stats[subject]
+                stats["attempts"] += 1
+                
+                if a.is_submitted:
+                    stats["completed"] += 1
+                    stats["total_questions"] += int(a.total_marks or 0)
+                    stats["correct"] += int(a.score or 0)
+                    stats["total_score"] += (a.percentage or 0)
+            except:
+                continue
+                
+        # Finalize stats
+        results = []
+        for subject, stats in subject_stats.items():
+            completed = stats["completed"]
+            avg_score = round(stats["total_score"] / completed, 1) if completed > 0 else 0
+            accuracy = round((stats["correct"] / stats["total_questions"] * 100), 1) if stats["total_questions"] > 0 else 0
+            
+            results.append({
+                "subject": subject,
+                "total_attempts": stats["attempts"],
+                "completed_attempts": completed,
+                "questions_solved": stats["total_questions"],
+                "accuracy": accuracy,
+                "average_score": avg_score
+            })
+            
+        return {
+            "breakdown": sorted(results, key=lambda x: x["completed_attempts"], reverse=True),
+            "total_subjects_practiced": len(results)
+        }
+
+    def get_comprehensive_user_stats(self, user_id: str) -> Dict[str, Any]:
+        """Get high-level stats aggregating everything"""
+        from ..models.user_attempt import UserAttempt
+        
+        # All attempts (PYQ + Law)
+        all_attempts = self.session.query(UserAttempt).filter(UserAttempt.user_identifier == user_id).all()
+        
+        submitted = [a for a in all_attempts if a.is_submitted]
+        
+        total_quizzes = len(submitted)
+        total_questions = sum(int(a.total_marks or 0) for a in submitted)
+        total_time_seconds = sum(int(a.time_taken_seconds or 0) for a in submitted)
+        
+        avg_score = sum(a.percentage or 0 for a in submitted) / total_quizzes if total_quizzes > 0 else 0
+        
+        return {
+            "total_quizzes_completed": total_quizzes,
+            "total_questions_answered": total_questions,
+            "total_study_time_minutes": int(total_time_seconds / 60),
+            "average_accuracy": round(avg_score, 1),
+            "total_attempts_started": len(all_attempts)
+        }

@@ -29,10 +29,14 @@ async def get_user_quiz_history(
 
 @router.get("/user/stats")
 async def get_user_stats(
+    user_id: str = None,
     current_user: User = Depends(get_current_user_conditional),
     analytics: AnalyticsService = Depends(get_analytics_service)
 ) -> Dict[str, Any]:
-    return analytics.get_user_stats(current_user.user_id)
+    effective_user_id = user_id or (current_user.user_id if current_user else None)
+    if not effective_user_id:
+        raise HTTPException(status_code=400, detail="User ID required")
+    return analytics.get_user_stats(effective_user_id)
 
 
 @router.get("/law/stats")
@@ -42,6 +46,15 @@ async def get_law_stats(
 ) -> Dict[str, Any]:
     """Get statistics for law/legal quizzes (generated, correct answers, etc.)"""
     return analytics.get_law_stats(user_id)
+
+
+@router.get("/library/stats")
+async def get_library_stats(
+    user_id: str,
+    analytics: AnalyticsService = Depends(get_analytics_service)
+) -> Dict[str, Any]:
+    """Get statistics for library/collection usage"""
+    return analytics.get_library_stats(user_id)
 
 
 @router.get("/user/metrics")
