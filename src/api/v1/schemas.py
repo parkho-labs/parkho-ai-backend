@@ -21,119 +21,6 @@ class StandardAPIResponse(BaseModel, Generic[T]):
         return cls(status="error", message=message, error_code=error_code)
 
 
-class JobStatus(str, Enum):
-    PENDING = "JOB_PENDING"
-    RUNNING = "JOB_RUNNING"
-    SUCCESS = "JOB_SUCCESS"
-    FAILED = "JOB_FAILED"
-    CANCELLED = "JOB_CANCELLED"
-
-
-class QuestionType(str, Enum):
-    MULTIPLE_CHOICE = "multiple_choice"
-    TRUE_FALSE = "true_false"
-    SHORT_ANSWER = "short_answer"
-    MULTIPLE_CORRECT = "multiple_correct"
-
-
-class QuestionTypeCount(BaseModel):
-    question_type: QuestionType
-    count: int
-
-
-class QuestionCountsResponse(BaseModel):
-    counts: List[QuestionTypeCount]
-
-    def get_count_for_type(self, question_type: QuestionType) -> int:
-        for item in self.counts:
-            if item.question_type == question_type:
-                return item.count
-        return 0
-
-
-class DifficultyLevel(str, Enum):
-    BEGINNER = "beginner"
-    INTERMEDIATE = "intermediate"
-    ADVANCED = "advanced"
-
-
-class LLMProvider(str, Enum):
-    OPENAI = "openai"
-    GEMINI = "gemini"
-    ANTHROPIC = "anthropic"
-
-
-class InputType(str, Enum):
-    COLLECTION = "collection"
-    FILES = "files"
-
-
-class ContentSubject(str, Enum):
-    PHYSICS = "physics"
-    MATHEMATICS = "mathematics"
-    CHEMISTRY = "chemistry"
-    BIOLOGY = "biology"
-    GENERAL = "general"
-
-
-class ContentInput(BaseModel):
-    content_type: InputType
-    id: str
-
-
-class ContentProcessingRequest(BaseModel):
-    input_config: List[ContentInput] = Field(min_items=1)
-    question_types: Dict[str, int] = Field(default={"multiple_choice": 5}, description="Question types with counts")
-    difficulty_level: DifficultyLevel = Field(default=DifficultyLevel.INTERMEDIATE)
-    generate_summary: bool = Field(default=True)
-    llm_provider: LLMProvider = Field(default=LLMProvider.OPENAI)
-    collection_name: Optional[str] = Field(default=None, description="Collection to use for RAG context")
-    should_add_to_collection: bool = Field(default=False, description="Whether to add processed content to the collection")
-    structured_response: bool = Field(default=True, description="Enable structured JSON response for question generation")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "input_config": [
-                    {"content_type": "youtube", "id": "https://youtu.be/abc123"},
-                    {"content_type": "files", "id": "file-hash-456"}
-                ],
-                "question_types": {"multiple_choice": 3, "short_answer": 2},
-                "difficulty_level": "intermediate",
-                "generate_summary": True,
-                "llm_provider": "openai",
-                "collection_name": "physics_course",
-                "should_add_to_collection": True,
-                "structured_response": True
-            }
-        }
-
-
-class ContentJobBase(BaseModel):
-    status: JobStatus
-    created_at: datetime
-    completed_at: Optional[datetime]
-    title: Optional[str]
-
-
-
-
-class ContentJobResponse(ContentJobBase):
-    id: int
-    progress: float = Field(..., ge=0.0, le=100.0)
-    error_message: Optional[str]
-    input_url: Optional[str] = None
-    file_ids: List[str] = Field(default=[])
-
-    class Config:
-        from_attributes = True
-
-
-class ContentResults(ContentJobBase):
-    job_id: int
-    processing_duration_seconds: Optional[int]
-    
-    
 class FileUploadResponse(BaseModel):
     file_id: str
     filename: str
@@ -168,99 +55,6 @@ class FileConfirmRequest(BaseModel):
     indexing: bool = True
 
 
-class FileProcessingResult(BaseModel):
-    file_id: str
-    job_id: Optional[int] = None
-    status: JobStatus
-    message: str
-    estimated_duration_minutes: Optional[int] = None
-    websocket_url: Optional[str] = None
-    error_details: Optional[str] = None
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "file_id": "file_abc123",
-                "job_id": 42,
-                "status": "processing",
-                "message": "File processing started successfully",
-                "estimated_duration_minutes": 5,
-                "websocket_url": "ws://127.0.0.1:8080/ws/jobs/42"
-            }
-        }
-
-
-class SummaryResponse(BaseModel):
-    summary: Optional[str]
-
-
-class ContentTextResponse(BaseModel):
-    content_text: Optional[str]
-
-
-class ContentJobsListResponse(BaseModel):
-    total: int
-    jobs: List[ContentJobResponse]
-
-
-class QuizQuestionResponse(BaseModel):
-    question_id: str
-    question: str
-    type: str
-    options: Optional[List[str]] = None
-    context: Optional[str] = None
-    max_score: int
-
-
-class QuestionConfig(BaseModel):
-    type: QuestionType
-    options: Optional[Dict[str, str]] = None
-    requires_diagram: bool = False
-    diagram_type: Optional[str] = None
-    diagram_elements: Optional[Dict[str, Any]] = None
-
-
-class QuestionMetadata(BaseModel):
-    video_timestamp: Optional[str] = None
-    sources: Optional[Dict[str, Any]] = None
-
-
-class QuizQuestion(BaseModel):
-    question_id: str
-    question: str
-    question_config: QuestionConfig
-    metadata: QuestionMetadata = Field(default_factory=dict)
-    max_score: int = 1
-
-
-class QuizResponse(BaseModel):
-    quiz_id: str
-    quiz_title: str
-    questions: List[QuizQuestion]
-    total_questions: int
-    total_score: int
-    summary: Optional[str] = None
-
-
-class QuizSubmission(BaseModel):
-    answers: Dict[str, str]
-
-
-class QuizResult(BaseModel):
-    question_id: str
-    user_answer: str
-    correct_answer: str
-    is_correct: bool
-    score: int
-
-
-class QuizEvaluationResult(BaseModel):
-    total_score: int
-    max_possible_score: int
-    percentage: float
-    results: List[QuizResult]
-
-
 class RAGFileUploadResponse(BaseModel):
     file_id: str
     filename: str
@@ -282,12 +76,6 @@ class RAGCollectionInfo(BaseModel):
 class RAGCollectionResponse(BaseModel):
     status: str
     message: str
-    # Relaxed to allow various body structures or strictly defined unions
-    # For now, simplifying to generic Dict/Any to avoid strict validation errors during rapid dev
-    # But following PR advice: we probably want specific models.
-    # However, existing code uses this model for List Collections which returns Dict[str, List].
-    # Create Collection returns single object.
-    # Let's make body Any for flexibility or Union.
     body: Optional[Any] = None 
 
 
@@ -295,25 +83,6 @@ class RAGFileItem(BaseModel):
     file_id: str
     type: str = Field(default="file")
     name: str
-
-
-class RAGLinkContentRequest(BaseModel):
-    content_items: Optional[List[RAGFileItem]] = None # Deprecated?
-    file_ids: Optional[List[str]] = None # New simpler request
-
-
-class RAGLinkContentResponse(BaseModel):
-    name: Optional[str] = None
-    file_id: str
-    type: Optional[str] = "file"
-    created_at: Optional[str] = None
-    indexing_status: Optional[str] = None
-    status_code: int = 200
-    message: str = "Success"
-
-
-class RAGUnlinkContentRequest(BaseModel):
-    file_ids: List[str]
 
 
 class RAGFileDetail(BaseModel):
@@ -441,12 +210,6 @@ class QueryResponse(BaseModel):
     chunks: List[Any] = Field(default_factory=list)
     critic: Optional[Any] = None
 
-# Retrieve works same as Query but chunks only. 
-# Reusing schemas where possible but keeping distinct if needed.
-# Doc says Retrieve works on chunks only. 
-# RetrieveRequest in doc: query, filters, top_k, include_graph_context
-# The existing RetrieveRequest matches doc roughly (include_graph_context present).
-
 class RetrieveRequest(BaseModel):
     query: str
     filters: Optional[QueryFilters] = None
@@ -517,86 +280,9 @@ class RagQuestionGenerationResponse(BaseModel):
     generation_time: Optional[float] = None
 
 
-class ContentStatsRequest(BaseModel):
-    collection_ids: Optional[List[str]] = None
-
-
-class ContentStatistics(BaseModel):
-    total_chunks: int
-    unique_files: int
-    unique_collections: int
-    avg_text_length: float
-    chunk_types: List[str]
-    sample_chapters: List[str]
-
-
-class ContentStatsResponse(BaseModel):
-    success: bool
-    statistics: ContentStatistics
-    message: str
-
-
-class SupportedQuestionType(BaseModel):
-    type: str
-    name: str
-    description: str
-    typical_time: str
-
-
-class DifficultyLevel(BaseModel):
-    level: str
-    name: str
-    description: str
-    characteristics: List[str]
-
-
-class SupportedTypesResponse(BaseModel):
-    question_types: List[SupportedQuestionType]
-    difficulty_levels: List[DifficultyLevel]
-    filters: List[str]
-
-
-class ContentValidationRequest(BaseModel):
-    questions: List[QuestionSpec]
-
-
-class ContentValidationResult(BaseModel):
-    question_type: str
-    difficulty: str
-    requested_count: int
-    available_count: int
-    can_fulfill: bool
-
-
-class ContentValidationResponse(BaseModel):
-    validation_results: List[ContentValidationResult]
-    overall_feasible: bool
-
-
-class HealthCheckResponse(BaseModel):
-    status: str
-    neo4j_connected: bool
-    total_chunks: int
-    unique_files: int
-    service_ready: bool
-    timestamp: str
-
-
-# =============================================================================
-# LEGAL RAG ENGINE SCHEMAS (for /law/chat, /questions/generate, /retrieve)
-# =============================================================================
-
-# Legal Question Types - Flexible string to pass through to RAG
-# Common types: "mcq", "assertion_reasoning", "match_following", "comprehension"
-# This is intentionally NOT an Enum to allow RAG to define new types without backend changes
-
-
-# Legal Difficulty Levels - Flexible string to pass through to RAG
-# Common levels: "easy", "moderate", "difficult"
 LegalDifficultyLevel = str
 
 
-# Law Chat Endpoint Schemas (/law/chat)
 class LawChatRequest(BaseModel):
     question: str = Field(..., min_length=10, max_length=500, description="Legal question (10-500 chars)")
     enable_rag: bool = Field(default=True, description="If True, use RAG with all legal documents. If False, use direct LLM with legal system prompt")
@@ -613,7 +299,6 @@ class LawChatResponse(BaseModel):
     total_chunks: int
 
 
-# Legal Question Generation Schemas (/questions/generate)
 class LegalQuestionSpec(BaseModel):
     type: str = Field(..., description="Question type (e.g., 'mcq', 'assertion_reasoning', 'match_following', 'comprehension')")
     difficulty: LegalDifficultyLevel
@@ -630,7 +315,6 @@ class LegalQuestionRequest(BaseModel):
     context: Optional[LegalQuestionContext] = None
 
 
-# Legal Question Content Structures (matches documentation)
 class AssertionReasoningQuestion(BaseModel):
     question_text: str
     assertion: str
@@ -698,11 +382,6 @@ class LegalQuestionResponse(BaseModel):
     warnings: List[str] = Field(default=[])
 
 
-# =============================================================================
-# NEW LEGAL QUIZ APIS - CUSTOM AND MOCK QUIZ
-# =============================================================================
-
-# Custom Quiz - User specifies question types and counts
 class CustomQuestionSpec(BaseModel):
     type: str = Field(..., description="Question type (e.g., 'mcq', 'assertion_reasoning', 'match_following', 'comprehension')")
     count: int = Field(..., ge=1, le=10, description="Number of questions (1-10)")
@@ -715,7 +394,6 @@ class CustomQuizRequest(BaseModel):
     filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional filters like collection_ids")
     include_answers: bool = Field(default=False, description="If True, include answers in response. If False, only return questions for quiz-taking")
 
-# Mock Quiz - System generates random mix with equal distribution
 class MockQuizRequest(BaseModel):
     total_questions: int = Field(..., ge=3, le=50, description="Total questions for mock quiz (3-50, must be divisible by 3)")
     subject: Optional[str] = Field(default="Constitutional Law", description="Subject context")
@@ -730,7 +408,6 @@ class MockQuizRequest(BaseModel):
             raise ValueError('total_questions must be divisible by 3 for equal distribution')
         return v
 
-# Enhanced response for both new APIs
 class QuizGenerationResponse(BaseModel):
     success: bool
     total_generated: int
@@ -742,11 +419,9 @@ class QuizGenerationResponse(BaseModel):
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
 
-# Alias for standard QuestionGenerationResponse
 QuestionGenerationResponse = QuizGenerationResponse
 
 
-# Legal Content Retrieval Schemas (/retrieve)
 class LegalRetrieveRequest(BaseModel):
     query: str
     user_id: str
@@ -768,11 +443,6 @@ class LegalRetrieveResponse(BaseModel):
     results: List[LegalChunk]
 
 
-# =============================================================================
-# PYQ (Previous Year Questions) SCHEMAS
-# =============================================================================
-
-# Base PYQ Schemas
 class ExamPaperSummary(BaseModel):
     id: int
     title: str
@@ -813,7 +483,6 @@ class PaperListResponse(BaseModel):
     pagination: Dict[str, int]
 
 
-# Exam Attempt Schemas
 class StartAttemptResponse(BaseModel):
     attempt_id: int
     paper_id: int
@@ -946,7 +615,6 @@ class AvailableFiltersResponse(BaseModel):
     exam_names: List[str]
 
 
-# PDF Parsing Schemas (for admin/dev data ingestion)
 class ParsePDFRequest(BaseModel):
     url: str = Field(..., description="URL of the PDF to parse")
     title: Optional[str] = Field(None, description="Optional exam title")

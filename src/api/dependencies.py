@@ -6,14 +6,12 @@ from sqlalchemy.orm import Session
 
 from ..core.database import get_db
 from ..core.firebase import verify_firebase_token, get_or_create_user
-from ..repositories.content_job_repository import ContentJobRepository
 from ..repositories.file_repository import FileRepository
-from ..repositories.quiz_repository import QuizRepository
 from ..repositories.analytics_repository import AnalyticsRepository
 from ..repositories.collection_repository import CollectionRepository
 from ..services.file_storage import FileStorageService
 from ..services.analytics_service import AnalyticsService
-from ..services.analytics_dashboard_service import get_analytics_dashboard_service, AnalyticsDashboardService
+# Analytics dashboard service import removed as part of API cleanup
 from ..services.llm_service import LLMService
 from ..services.collection_service import CollectionService
 from ..services.rag import (
@@ -34,16 +32,8 @@ logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
 
 
-def get_content_job_repository(db: Session = Depends(get_db)) -> ContentJobRepository:
-    return ContentJobRepository(db)
-
-
 def get_file_repository(db: Session = Depends(get_db)) -> FileRepository:
     return FileRepository(db)
-
-
-def get_quiz_repository(db: Session = Depends(get_db)) -> QuizRepository:
-    return QuizRepository(db)
 
 def get_collection_repository(db: Session = Depends(get_db)) -> CollectionRepository:
     return CollectionRepository(db)
@@ -62,8 +52,7 @@ def get_analytics_service(repo: AnalyticsRepository = Depends(get_analytics_repo
     return AnalyticsService(repo)
 
 
-def get_analytics_dashboard_service_dep() -> AnalyticsDashboardService:
-    return get_analytics_dashboard_service()
+# Analytics dashboard service dependency function removed as part of API cleanup
 
 
 def get_llm_service() -> LLMService:
@@ -234,10 +223,7 @@ async def get_current_user_optional_conditional(
     return await get_current_user_optional(request, db, credentials)
 
 
-# Legacy dependencies for backward compatibility during transition
-def get_video_job_repository(db: Session = Depends(get_db)):
-    # Temporary redirect to content job repository
-    return ContentJobRepository(db)
+# Legacy dependencies removed as part of content/quiz API cleanup
 
 
 # =============================================================================

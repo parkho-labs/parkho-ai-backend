@@ -84,14 +84,7 @@ class Settings(BaseSettings):
     rag_engine_url: str = Field(default="http://localhost:8000/api/v1", description="RAG Engine API base URL")
     rag_questions_timeout: float = Field(default=60.0, description="Timeout for RAG question generation requests in seconds")
 
-    # Analytics Dashboard Configuration
-    analytics_provider: str = Field(default="google_studio", description="Analytics dashboard provider")
-
-    # Google Data Studio Configuration
-    google_studio_learning_report_id: str = Field(default="", description="Google Data Studio learning analytics report ID")
-    google_studio_quiz_report_id: str = Field(default="", description="Google Data Studio quiz performance report ID")
-    google_studio_content_report_id: str = Field(default="", description="Google Data Studio content analytics report ID")
-    google_studio_user_report_id: str = Field(default="", description="Google Data Studio user insights report ID")
+# Analytics dashboard configuration removed as part of API cleanup
 
     # Question Generation Settings
     structured_response_default: bool = Field(default=True, description="Default value for structured response generation")
