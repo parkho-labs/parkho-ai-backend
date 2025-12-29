@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Dict, Any
 
-from ...dependencies import get_analytics_service, get_current_user_conditional, get_current_user_conditional, get_content_job_repository
+from ...dependencies import get_analytics_service, get_current_user_conditional
 from ....services.analytics_service import AnalyticsService
 from ....models.user import User
 
@@ -75,15 +75,4 @@ async def get_user_mastery_stats(
     return analytics.get_mastery_stats(user_id)
 
 
-@router.get("/quiz/{quiz_id}/performance")
-async def get_quiz_performance(
-    quiz_id: int,
-    current_user: User = Depends(get_current_user_conditional),
-    job_repo = Depends(get_content_job_repository),
-    analytics: AnalyticsService = Depends(get_analytics_service)
-) -> Dict[str, Any]:
-    job = job_repo.get(quiz_id)
-    if not job or job.user_id != current_user.user_id:
-        raise HTTPException(status_code=404, detail="Quiz not found")
-
-    return analytics.get_quiz_analytics(quiz_id)
+# Note: The quiz performance endpoint has been removed as part of content/quiz API cleanup

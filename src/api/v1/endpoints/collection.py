@@ -18,7 +18,6 @@ from src.api.v1.schemas import (
     RAGQueryResponse,
     RAGCollectionFilesResponse,
     RAGFileDetail,
-    RAGLinkContentRequest,
     FileUploadUrlRequest,
     PresignedUrlResponse,
     FileConfirmRequest,

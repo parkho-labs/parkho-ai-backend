@@ -1,3 +1,3 @@
-from .quiz_response_mapper import QuizResponseMapper
+# All mappers removed as part of content/quiz API cleanup
 
-__all__ = ["QuizResponseMapper"]
+__all__ = []
