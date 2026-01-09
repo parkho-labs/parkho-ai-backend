@@ -6,8 +6,8 @@ from ...core.database import Base
 
 class NewsArticle(Base):
     """
-    Clean NewsArticle model with essential fields only.
-    Optimized for performance and simplicity.
+    NewsArticle model with structured content for rich frontend display.
+    Supports AI-formatted content, suggested questions, and related topics.
     """
     __tablename__ = "news_articles"
 
@@ -20,11 +20,26 @@ class NewsArticle(Base):
     source = Column(String(200), nullable=False)
     category = Column(String(100), nullable=False)
 
-    # Content fields
+    # Content fields (raw)
     description = Column(Text)
     full_content = Column(Text)
     summary = Column(Text)
     keywords = Column(JSON)
+
+    # Structured content (AI-formatted)
+    formatted_content = Column(JSON)  # Structured sections: paragraph, heading, quote, list, etc.
+    quick_summary = Column(Text)  # AI-generated 2-3 sentence summary
+    key_points = Column(JSON)  # List of 3-5 bullet points
+    
+    # Contextual suggestions (AI-generated)
+    suggested_questions = Column(JSON)  # Context-specific questions for the article
+    explore_topics = Column(JSON)  # Related topics to explore with RAG queries
+    
+    # Article metadata
+    reading_time_minutes = Column(Integer)  # Calculated reading time
+    word_count = Column(Integer)  # Word count of full content
+    court_name = Column(String(200))  # Court name if judicial news
+    bench_info = Column(String(500))  # Bench/judge information
 
     # Image fields
     featured_image_url = Column(String(1000))
@@ -39,6 +54,7 @@ class NewsArticle(Base):
     # Source tracking and processing
     news_source = Column(String(200))  # Specific source (e.g., "Indian Kanoon - Supreme Court")
     content_processed = Column(Boolean, default=False)  # Track if content has been cleaned
+    is_formatted = Column(Boolean, default=False)  # Track if AI formatting is complete
 
     # Timestamps
     published_at = Column(DateTime)

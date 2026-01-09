@@ -143,6 +143,128 @@ class NewsRagService:
             logger.error(f"Error in contextual query: {e}")
             return {"success": False, "error": str(e)}
 
+    async def answer_from_article_content(
+        self, 
+        question: str, 
+        article: 'NewsArticle',
+        answer_style: str = "detailed"
+    ) -> Dict[str, Any]:
+        """
+        Answer question directly using article content with LLM (fallback when RAG fails).
+        This ensures user NEVER gets an error - we always have the article content.
+
+        Args:
+            question: User question
+            article: NewsArticle object with full_content
+            answer_style: "brief" or "detailed"
+
+        Returns:
+            Response dict with answer and sources
+        """
+        try:
+            from .llm_service import LLMService
+
+            llm_service = LLMService(
+                openai_api_key=self.settings.openai_api_key,
+                anthropic_api_key=self.settings.anthropic_api_key,
+                google_api_key=self.settings.google_api_key
+            )
+
+            # Build context from article
+            article_context = self._build_article_context(article)
+
+            # System prompt for answering from article content
+            system_prompt = """You are a legal news assistant helping users understand legal news articles.
+Answer the user's question based ONLY on the provided article content.
+
+Guidelines:
+1. Be accurate and cite specific parts of the article when possible
+2. If the article doesn't contain information to answer the question, say so politely
+3. Keep the answer focused on what's in the article
+4. Use clear, accessible language while maintaining legal accuracy
+5. For legal terms, provide brief explanations if helpful
+
+IMPORTANT: Base your answer strictly on the article content provided. Do not make up information."""
+
+            user_prompt = f"""ARTICLE CONTENT:
+Title: {article.title}
+Source: {article.source}
+Category: {article.category}
+
+{article_context}
+
+---
+
+USER QUESTION: {question}
+
+Please answer the question based on the article content above."""
+
+            # Generate answer
+            answer = await llm_service.generate_with_fallback(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.3,
+                max_tokens=800 if answer_style == "detailed" else 400
+            )
+
+            logger.info(f"Generated answer from article content for article {article.id}")
+
+            return {
+                "success": True,
+                "answer": answer,
+                "sources": [
+                    {
+                        "text": article.full_content[:500] + "..." if len(article.full_content or "") > 500 else (article.full_content or ""),
+                        "source": article.source,
+                        "title": article.title
+                    }
+                ],
+                "context_type": "direct_article",
+                "rag_indexed": bool(article.rag_document_id)
+            }
+
+        except Exception as e:
+            logger.error(f"Error answering from article content: {e}")
+            # Even this fallback failed - return a graceful response
+            return {
+                "success": True,  # Still mark as success to not show error
+                "answer": f"I can help you understand this article about '{article.title}'. However, I'm having trouble processing your specific question right now. Please try rephrasing your question or ask about the main points of the article.",
+                "sources": [],
+                "context_type": "fallback",
+                "rag_indexed": False
+            }
+
+    def _build_article_context(self, article: 'NewsArticle') -> str:
+        """Build comprehensive context from article for LLM"""
+        parts = []
+
+        # Use formatted content if available
+        if article.quick_summary:
+            parts.append(f"SUMMARY: {article.quick_summary}")
+
+        if hasattr(article, 'key_points') and article.key_points:
+            key_points = article.key_points if isinstance(article.key_points, list) else []
+            if key_points:
+                parts.append("KEY POINTS:\n" + "\n".join(f"- {kp}" for kp in key_points))
+
+        # Full content
+        if article.full_content:
+            # Limit to avoid token issues
+            content = article.full_content
+            if len(content) > 6000:
+                content = content[:6000] + "... [content truncated]"
+            parts.append(f"FULL CONTENT:\n{content}")
+        elif article.description:
+            parts.append(f"DESCRIPTION:\n{article.description}")
+
+        # Court/legal context
+        if hasattr(article, 'court_name') and article.court_name:
+            parts.append(f"COURT: {article.court_name}")
+        if hasattr(article, 'bench_info') and article.bench_info:
+            parts.append(f"BENCH: {article.bench_info}")
+
+        return "\n\n".join(parts)
+
     async def generate_summary(self, article: NewsArticle, summary_type: str = "brief") -> str:
         """
         Generate summary for news article using specialized legal prompts

@@ -72,9 +72,9 @@ class LLMService:
         Generate response with automatic fallback between providers.
 
         Fallback order (unless preferred_provider specified):
-        1. OpenAI GPT-3.5-turbo (fast, reliable)
-        2. Google Gemini Pro (good fallback)
-        3. Anthropic Claude (high quality)
+        1. Google Gemini (fast, cost-effective)
+        2. Anthropic Claude (high quality)
+        3. OpenAI GPT (reliable fallback)
         """
 
         # If preferred provider specified, try it first
@@ -86,8 +86,8 @@ class LLMService:
             except Exception as e:
                 logger.warning(f"{preferred_provider} failed, trying fallbacks", error=str(e))
 
-        # Try providers in fallback order
-        providers_to_try = [LLMProvider.OPENAI, LLMProvider.GOOGLE, LLMProvider.ANTHROPIC]
+        # Try providers in fallback order - Google first (fast & cheap)
+        providers_to_try = [LLMProvider.GOOGLE, LLMProvider.ANTHROPIC, LLMProvider.OPENAI]
         if preferred_provider:
             # Remove preferred from list since we already tried it
             providers_to_try = [p for p in providers_to_try if p != preferred_provider]

@@ -4,7 +4,9 @@ Background processing pipeline for news articles:
 1. Fetch from multiple sources
 2. Extract full content
 3. Download and store images
-4. Index in RAG system
+4. Format content with AI (structured sections, summaries, etc.)
+5. Generate suggestions (questions, topics)
+6. Index in RAG system
 """
 
 import asyncio
@@ -12,12 +14,14 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, and_
 
 from ...core.database import SessionLocal
 from ..models.news_article import NewsArticle
 from .sources.manager import NewsSourceManager
 from .content_scraper import ContentScraperService
+from .content_formatter import ContentFormatterService
+from .question_generator import QuestionGeneratorService
 from ...services.background_jobs import index_article_immediately
 
 logger = logging.getLogger(__name__)
@@ -29,6 +33,8 @@ class NewsCronService:
     def __init__(self):
         self.source_manager = NewsSourceManager()
         self.content_scraper = ContentScraperService()
+        self.content_formatter = ContentFormatterService()
+        self.question_generator = QuestionGeneratorService()
 
     async def run_complete_pipeline(self, fetch_limit: int = 50) -> Dict[str, Any]:
         """
@@ -48,6 +54,7 @@ class NewsCronService:
             "pipeline_start": pipeline_start,
             "fetch_stats": {},
             "content_extraction_stats": {},
+            "formatting_stats": {},
             "rag_indexing_stats": {},
             "total_processing_time": 0,
             "success": True,
@@ -65,8 +72,13 @@ class NewsCronService:
             content_stats = await self._extract_content_for_articles()
             stats["content_extraction_stats"] = content_stats
 
-            # Step 3: Index articles in RAG system
-            logger.info("🤖 Step 3: Indexing articles in RAG...")
+            # Step 3: Format articles with AI
+            logger.info("✨ Step 3: Formatting articles with AI...")
+            formatting_stats = await self._format_articles_with_ai()
+            stats["formatting_stats"] = formatting_stats
+
+            # Step 4: Index articles in RAG system
+            logger.info("🤖 Step 4: Indexing articles in RAG...")
             rag_stats = await self._index_articles_in_rag()
             stats["rag_indexing_stats"] = rag_stats
 
@@ -185,6 +197,8 @@ class NewsCronService:
                     # Update article
                     if content:
                         article.full_content = content
+                        article.word_count = len(content.split())
+                        article.reading_time_minutes = max(1, article.word_count // 200)
                         stats["content_extracted"] += 1
                         logger.info(f"  ✅ Extracted {len(content)} characters")
 
@@ -212,11 +226,112 @@ class NewsCronService:
         finally:
             db.close()
 
+    async def _format_articles_with_ai(self) -> Dict[str, Any]:
+        """Format articles with AI - generate structured content, summaries, and suggestions"""
+        db = SessionLocal()
+        try:
+            # Find articles with content but not yet formatted
+            articles_to_format = db.query(NewsArticle).filter(
+                and_(
+                    NewsArticle.full_content.isnot(None),
+                    NewsArticle.full_content != '',
+                    or_(
+                        NewsArticle.is_formatted.is_(None),
+                        NewsArticle.is_formatted == False
+                    )
+                )
+            ).order_by(NewsArticle.created_at.desc()).limit(20).all()
+
+            stats = {
+                "articles_processed": 0,
+                "successfully_formatted": 0,
+                "questions_generated": 0,
+                "formatting_failures": 0
+            }
+
+            for article in articles_to_format:
+                try:
+                    logger.info(f"✨ Formatting article: {article.title[:50]}...")
+
+                    # Step 1: Format content with AI
+                    formatted = await self.content_formatter.format_article(
+                        title=article.title,
+                        content=article.full_content,
+                        source=article.source,
+                        category=article.category
+                    )
+
+                    # Update article with formatted content
+                    article.quick_summary = formatted.quick_summary
+                    article.key_points = formatted.key_points
+                    article.formatted_content = formatted.formatted_content
+                    article.reading_time_minutes = formatted.reading_time_minutes
+                    article.word_count = formatted.word_count
+                    article.court_name = formatted.court_name
+                    article.bench_info = formatted.bench_info
+
+                    logger.info(f"  📝 Formatted content with {len(formatted.formatted_content)} sections")
+
+                    # Step 2: Generate suggestions
+                    suggestions = await self.question_generator.generate_suggestions(
+                        title=article.title,
+                        content=article.full_content[:2000],  # Use first 2000 chars
+                        category=article.category,
+                        keywords=article.keywords or []
+                    )
+
+                    # Convert to serializable format
+                    article.suggested_questions = [
+                        {
+                            "id": q.id,
+                            "question": q.question,
+                            "category": q.category,
+                            "icon": q.icon
+                        }
+                        for q in suggestions.suggested_questions
+                    ]
+
+                    article.explore_topics = [
+                        {
+                            "topic": t.topic,
+                            "description": t.description,
+                            "icon": t.icon,
+                            "query": t.query
+                        }
+                        for t in suggestions.explore_topics
+                    ]
+
+                    logger.info(f"  💡 Generated {len(suggestions.suggested_questions)} questions, {len(suggestions.explore_topics)} topics")
+
+                    # Mark as formatted
+                    article.is_formatted = True
+                    article.updated_at = datetime.now()
+
+                    stats["successfully_formatted"] += 1
+                    stats["questions_generated"] += len(suggestions.suggested_questions)
+                    stats["articles_processed"] += 1
+
+                except Exception as e:
+                    logger.error(f"Failed to format article {article.id}: {e}")
+                    stats["formatting_failures"] += 1
+                    stats["articles_processed"] += 1
+
+            db.commit()
+            logger.info(f"✅ AI formatting completed: {stats['successfully_formatted']}/{stats['articles_processed']} successful")
+            return stats
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed AI formatting process: {e}")
+            raise e
+        finally:
+            db.close()
+
     async def _index_articles_in_rag(self) -> Dict[str, Any]:
         """Index articles in RAG system that have content but aren't indexed"""
         db = SessionLocal()
         try:
-            # Find articles ready for RAG indexing
+            # Find articles ready for RAG indexing (formatted and not indexed)
             articles_for_rag = db.query(NewsArticle).filter(
                 NewsArticle.full_content.isnot(None),
                 NewsArticle.full_content != '',
@@ -275,22 +390,29 @@ class NewsCronService:
                 NewsArticle.full_content != ''
             ).count()
 
+            articles_formatted = db.query(NewsArticle).filter(
+                NewsArticle.is_formatted == True
+            ).count()
+
             articles_rag_indexed = db.query(NewsArticle).filter(
                 NewsArticle.is_rag_indexed == True
             ).count()
 
             # Calculate percentages
             content_extraction_rate = (articles_with_content / total_articles * 100) if total_articles > 0 else 0
+            formatting_rate = (articles_formatted / total_articles * 100) if total_articles > 0 else 0
             rag_indexing_rate = (articles_rag_indexed / total_articles * 100) if total_articles > 0 else 0
 
             health_status = {
                 "total_articles": total_articles,
                 "articles_with_content": articles_with_content,
+                "articles_formatted": articles_formatted,
                 "articles_rag_indexed": articles_rag_indexed,
                 "content_extraction_rate": round(content_extraction_rate, 2),
+                "formatting_rate": round(formatting_rate, 2),
                 "rag_indexing_rate": round(rag_indexing_rate, 2),
                 "source_health": self.source_manager.health_check(),
-                "overall_health": "healthy" if content_extraction_rate > 80 and rag_indexing_rate > 70 else "needs_attention"
+                "overall_health": "healthy" if content_extraction_rate > 80 and formatting_rate > 70 else "needs_attention"
             }
 
             logger.info(f"Pipeline health check: {health_status['overall_health']}")
