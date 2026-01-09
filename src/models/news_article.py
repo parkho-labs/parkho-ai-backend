@@ -20,12 +20,6 @@ class NewsArticle(Base):
     published_at = Column(DateTime)
     fetched_at = Column(DateTime, default=func.now())
 
-    # Image fields
-    featured_image_url = Column(String(1000))
-    thumbnail_url = Column(String(1000))
-    image_caption = Column(String(500))
-    image_alt_text = Column(String(200))
-
     rag_document_id = Column(String(255))
     rag_indexed_at = Column(DateTime)
 

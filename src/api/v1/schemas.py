@@ -279,6 +279,9 @@ class LawChatResponse(BaseModel):
     sources: List[LawSource]
     total_chunks: int
     context_used: Optional[str] = Field(default=None, description="Context type used: 'news', 'general', or 'mixed'")
+    # Intent classification metadata (from IntentClassifier)
+    detected_expertise: Optional[str] = Field(default=None, description="Detected user expertise: 'layman', 'student', or 'professional'")
+    detected_question_type: Optional[str] = Field(default=None, description="Detected question type: 'conceptual', 'procedural', 'case_based', 'comparison', or 'practical'")
 
 
 class LegalQuestionSpec(BaseModel):

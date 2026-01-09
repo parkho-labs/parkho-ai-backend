@@ -3,6 +3,11 @@ Legal Assistant API (Chatbot) Endpoint
 
 Provides /legal/ask-question endpoint for interactive Q&A on constitutional law queries.
 Business-focused frontend API that uses RagClient internally.
+
+Features:
+- RAG-based responses using legal document collections
+- Direct LLM mode with adaptive prompts based on user expertise
+- Intent classification for personalized responses
 """
 
 import structlog
@@ -13,8 +18,9 @@ from src.api.dependencies import get_legal_user_id_required, get_law_rag_client
 from src.services.rag import LawRagClient
 from src.api.v1.schemas import LawChatRequest, LawChatResponse, LawSource
 from src.core.database import get_db
-from src.models.news_article import NewsArticle
+from src.news.models.news_article import NewsArticle
 from src.services.news_rag_service import create_news_rag_service
+from src.services.intent_classifier import get_intent_classifier
 from sqlalchemy.orm import Session
 
 logger = structlog.get_logger(__name__)
@@ -114,7 +120,8 @@ async def legal_assistant_chat(
                 context_used="general"
             )
         else:
-            # Direct LLM Mode: Use LLM with general legal system prompt (no RAG)
+            # Direct LLM Mode: Use LLM with adaptive system prompt (no RAG)
+            # IntentClassifier builds a dynamic prompt that adapts to user expertise
             from src.services.llm_service import LLMService
             from src.config import get_settings
             
@@ -125,23 +132,26 @@ async def legal_assistant_chat(
                 google_api_key=settings.google_api_key
             )
             
-            # General legal system prompt
-            system_prompt = (
-                "You are an expert legal assistant specializing in Indian law, including Constitutional Law and the Bharatiya Nyaya Sanhita (BNS). "
-                "Provide accurate, well-structured answers to legal questions. "
-                "Use clear language suitable for students and legal professionals. "
-                "When citing laws, be specific about article numbers, sections, or provisions. "
-                "If you're unsure about something, acknowledge the limitation rather than providing incorrect information."
+            # Use IntentClassifier to build adaptive system prompt
+            # The classifier instructs the LLM to assess user expertise and question type,
+            # then adapt the response style accordingly
+            intent_classifier = get_intent_classifier()
+            system_prompt = intent_classifier.build_adaptive_prompt(request.question)
+            
+            logger.debug(
+                "Using adaptive prompt for direct LLM mode",
+                user_id=user_id,
+                question_preview=request.question[:50] + "..." if len(request.question) > 50 else request.question
             )
             
             user_prompt = request.question
             
-            # Generate answer using LLM
+            # Generate answer using LLM with adaptive prompt
             answer = await llm_service.generate_with_fallback(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 temperature=0.3,
-                max_tokens=1000
+                max_tokens=1500  # Increased to accommodate richer responses
             )
             
             response = LawChatResponse(

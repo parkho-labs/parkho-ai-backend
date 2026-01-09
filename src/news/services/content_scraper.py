@@ -22,7 +22,9 @@ try:
 except ImportError:
     BS4_AVAILABLE = False
 
-from ...core.firebase import upload_file_to_gcs
+from ...services.gcp_service import GCPService
+from ...config import get_settings
+from .smart_image_extractor import SmartImageExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,11 @@ class ContentScraperService:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         })
+
+        # Initialize GCP service for file uploads
+        self.settings = get_settings()
+        self.gcp_service = GCPService(self.settings)
+        self.smart_image_extractor = SmartImageExtractor(self.gcp_service)
 
         # Configure newspaper if available
         if NEWSPAPER_AVAILABLE:
@@ -243,10 +250,10 @@ class ContentScraperService:
 
             filename = f"news/{article_id}/image_{url_hash}{extension}"
 
-            # Upload to GCS
-            gcs_url = upload_file_to_gcs(
-                file_data=response.content,
-                filename=filename,
+            # Upload to GCS using the centralized service
+            gcs_url = self.gcp_service.upload_file_from_bytes(
+                blob_name=filename,
+                file_bytes=response.content,
                 content_type=content_type
             )
 
@@ -308,9 +315,15 @@ class ContentScraperService:
             logger.warning(f"Failed to extract image from {url}: {e}")
             return None
 
-    def process_article(self, url: str, article_id: int) -> Tuple[Optional[str], Optional[str]]:
+    def process_article(self, url: str, article_id: int, source: str = None, category: str = None) -> Tuple[Optional[str], Optional[str]]:
         """
-        Process article: extract content and download image
+        Process article: extract content and download image using smart extraction
+
+        Args:
+            url: Article URL
+            article_id: Database article ID
+            source: Article source name
+            category: Article category
 
         Returns:
             Tuple of (content, image_gcs_url)
@@ -319,13 +332,16 @@ class ContentScraperService:
         content_result = self.extract_article_content(url)
         content = content_result['content'] if content_result['success'] else None
 
-        # Extract and download image
+        # Extract and store image using smart extractor
         image_gcs_url = None
         try:
-            image_url = self.extract_article_image(url)
-            if image_url:
-                image_gcs_url = self.download_and_store_image(image_url, article_id)
+            image_gcs_url = self.smart_image_extractor.extract_and_store_image(
+                url=url,
+                article_id=article_id,
+                source=source or "Unknown",
+                category=category or "general"
+            )
         except Exception as e:
-            logger.warning(f"Image processing failed for article {article_id}: {e}")
+            logger.warning(f"Smart image extraction failed for article {article_id}: {e}")
 
         return content, image_gcs_url

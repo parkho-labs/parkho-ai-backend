@@ -9,6 +9,7 @@ import random
 
 from .base import NewsItem, NewsSourceAdapter
 from .indian_kanoon_rss import IndianKanoonRSSAdapter
+from .bar_and_bench_adapter import BarAndBenchAdapter
 
 
 class NewsSourceManager:
@@ -25,7 +26,8 @@ class NewsSourceManager:
         """Default configuration for news sources"""
         return {
             "source_weights": {
-                "indian_kanoon_rss": 1.0,  # Only proven working source
+                "indian_kanoon_rss": 0.0,  # Disabled - Bar and Bench is better
+                "bar_and_bench": 1.0,      # Primary source - high quality legal news
             },
             "fallback_enabled": True,
             "timeout_seconds": 10,
@@ -43,9 +45,15 @@ class NewsSourceManager:
         except Exception as e:
             print(f"⚠️ Could not load Indian Kanoon RSS adapter: {e}")
 
+        try:
+            sources["bar_and_bench"] = BarAndBenchAdapter()
+            print(f"✅ Loaded Bar and Bench adapter")
+        except Exception as e:
+            print(f"⚠️ Could not load Bar and Bench adapter: {e}")
+
         # Future sources can be added here when ready
-        # sources["livelaw_api"] = LiveLawAPIAdapter()
-        # sources["bar_bench"] = BarBenchAdapter()
+        # sources["scc_times"] = SCCTimesAdapter()
+        # sources["newsdata_api"] = NewsDataAdapter()
 
         print(f"📊 Loaded {len(sources)} news sources")
         return sources

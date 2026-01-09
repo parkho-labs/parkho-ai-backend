@@ -10,7 +10,7 @@ from typing import List
 from sqlalchemy.orm import Session
 
 from ..core.database import SessionLocal
-from ..models.news_article import NewsArticle
+from ..news.models.news_article import NewsArticle
 from .news_rag_service import create_news_rag_service
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,6 @@ class BackgroundIndexingService:
                         result_item = successful_results[i]
                         if result_item.get("status") == "INDEXING_SUCCESS":
                             article.rag_document_id = result_item.get("document_id")
-                            article.rag_indexed_at = datetime.now()
 
                 db.commit()
                 logger.info(f"Updated {len(successful_results)} articles with RAG document IDs")
@@ -108,7 +107,6 @@ class BackgroundIndexingService:
                         result_item = successful_results[i]
                         if result_item.get("status") == "INDEXING_SUCCESS":
                             article.rag_document_id = result_item.get("document_id")
-                            article.rag_indexed_at = datetime.now()
 
                 db.commit()
                 logger.info(f"Successfully reindexed {len(successful_results)} articles")
@@ -225,13 +223,13 @@ async def index_article_immediately(article_id: int) -> dict:
             first_result = result["results"][0]
             if first_result.get("status") == "INDEXING_SUCCESS":
                 article.rag_document_id = first_result.get("document_id")
-                article.rag_indexed_at = datetime.now()
+                article.is_rag_indexed = True
                 db.commit()
 
                 return {
                     "success": True,
                     "document_id": article.rag_document_id,
-                    "indexed_at": article.rag_indexed_at
+                    "indexed_at": datetime.now()
                 }
 
         return {"success": False, "error": "Indexing failed", "details": result}

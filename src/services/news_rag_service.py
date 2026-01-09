@@ -9,7 +9,7 @@ from typing import List, Dict, Optional, Any
 from datetime import datetime
 import asyncio
 
-from ..models.news_article import NewsArticle
+from ..news.models.news_article import NewsArticle
 from ..config import get_settings
 
 logger = logging.getLogger(__name__)

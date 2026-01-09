@@ -174,8 +174,13 @@ class NewsCronService:
                 try:
                     logger.info(f"📄 Extracting content for: {article.title[:50]}...")
 
-                    # Extract content and image
-                    content, image_gcs_url = self.content_scraper.process_article(article.url, article.id)
+                    # Extract content and image with smart extraction
+                    content, image_gcs_url = self.content_scraper.process_article(
+                        url=article.url,
+                        article_id=article.id,
+                        source=article.news_source or article.source,
+                        category=article.category
+                    )
 
                     # Update article
                     if content:
@@ -235,7 +240,6 @@ class NewsCronService:
                     if result.get("success"):
                         article.is_rag_indexed = True
                         article.rag_document_id = result.get("document_id")
-                        article.rag_indexed_at = datetime.now()
                         stats["successfully_indexed"] += 1
                         logger.info(f"  ✅ Successfully indexed with document ID: {result.get('document_id')}")
                     else:
