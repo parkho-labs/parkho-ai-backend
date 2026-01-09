@@ -10,7 +10,6 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from ..services.rag import LawRagClient, RagQueryRequest
-from ..services.rag_question_generator_service import RagQuestionGeneratorService
 from ..api.v1.schemas import (
     LawChatRequest, LawChatResponse, LawSource,
     LegalQuestionRequest, LegalQuestionResponse,
@@ -35,7 +34,6 @@ class LegalAssistantService:
 
     def __init__(self, rag_client: LawRagClient):
         self.rag_client = rag_client
-        self.rag_question_service = RagQuestionGeneratorService.get_instance()
         self.default_collections = ["constitution-golden-source"]
 
     async def process_legal_chat(
@@ -145,29 +143,26 @@ class LegalAssistantService:
                 "filters": filters
             })
 
-        # Build RAG request
-        from ..api.v1.schemas import RagQuestionGenerationRequest
-        rag_request = RagQuestionGenerationRequest(
-            questions=rag_questions,
-            context={"subject": request.context.subject if request.context else "Constitutional Law"}
-        )
-
-        # Generate questions
+        # Generate questions using the correct RAG client
         generation_start = datetime.now()
-        rag_response = await self.rag_question_service.generate_questions(rag_request)
+        context = {"subject": request.context.subject if request.context else "Constitutional Law"}
+
+        # Use the proper law/questions endpoint via RAG client
+        rag_response = await self.rag_client.legal_questions(
+            user_id="system",  # System-generated questions
+            questions=rag_questions,
+            context=context
+        )
         generation_time = (datetime.now() - generation_start).total_seconds()
 
         # Transform response to legal format
-        # (This would include the full transformation logic from questions.py)
-        # For now, we'll return the structured response as expected by the API
-
         return LegalQuestionResponse(
-            success=rag_response.success,
-            total_generated=rag_response.total_generated,
-            questions=rag_response.questions,
-            generation_stats=rag_response.generation_stats,
-            errors=rag_response.errors,
-            warnings=rag_response.warnings
+            success=rag_response.get("success", False),
+            total_generated=rag_response.get("total_generated", 0),
+            questions=rag_response.get("questions", []),
+            generation_stats=rag_response.get("generation_stats", {}),
+            errors=rag_response.get("errors", []),
+            warnings=rag_response.get("warnings", [])
         )
 
     async def retrieve_legal_content(

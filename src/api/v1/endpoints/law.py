@@ -12,6 +12,10 @@ from typing import List
 from src.api.dependencies import get_legal_user_id_required, get_law_rag_client
 from src.services.rag import LawRagClient
 from src.api.v1.schemas import LawChatRequest, LawChatResponse, LawSource
+from src.core.database import get_db
+from src.models.news_article import NewsArticle
+from src.services.news_rag_service import create_news_rag_service
+from sqlalchemy.orm import Session
 
 logger = structlog.get_logger(__name__)
 
@@ -22,7 +26,8 @@ router = APIRouter()
 async def legal_assistant_chat(
     request: LawChatRequest,
     user_id: str = Depends(get_legal_user_id_required),
-    rag_client: LawRagClient = Depends(get_law_rag_client)
+    rag_client: LawRagClient = Depends(get_law_rag_client),
+    db: Session = Depends(get_db)
 ) -> LawChatResponse:
     """
     Interactive Q&A chatbot for constitutional law queries.
@@ -41,7 +46,44 @@ async def legal_assistant_chat(
         total_chunks: Total number of source chunks used
     """
     try:
-        logger.info("Processing legal chat request", user_id=user_id, question_length=len(request.question), enable_rag=request.enable_rag)
+        logger.info("Processing legal chat request", user_id=user_id, question_length=len(request.question), enable_rag=request.enable_rag, news_context_id=request.news_context_id)
+
+        # Handle news context using NewsRagService
+        if request.news_context_id:
+            # Get news article for context
+            news_article = db.query(NewsArticle).filter(NewsArticle.id == request.news_context_id).first()
+            if news_article:
+                try:
+                    # Use NewsRagService for contextual query
+                    async with create_news_rag_service() as news_rag_service:
+                        rag_result = await news_rag_service.query_with_context(
+                            question=request.question,
+                            news_id=request.news_context_id,
+                            article_rag_id=news_article.rag_document_id
+                        )
+
+                    if rag_result.get("success") != False and rag_result.get("answer"):
+                        # Transform response to LawChatResponse format
+                        legal_sources = []
+                        if rag_result.get("sources"):
+                            for source in rag_result["sources"]:
+                                legal_sources.append(LawSource(
+                                    text=source.get("text", "")[:200] + ("..." if len(source.get("text", "")) > 200 else ""),
+                                    article=f"News: {news_article.title[:50]}..."
+                                ))
+
+                        response = LawChatResponse(
+                            answer=rag_result["answer"],
+                            sources=legal_sources,
+                            total_chunks=len(rag_result.get("sources", [])),
+                            context_used="news"
+                        )
+
+                        logger.info("News context query completed", user_id=user_id, news_id=request.news_context_id)
+                        return response
+
+                except Exception as e:
+                    logger.warning("News context query failed, falling back to general", error=str(e), news_id=request.news_context_id)
 
         if request.enable_rag:
             # RAG Mode: Use all legal content (constitution + BNS)
@@ -68,7 +110,8 @@ async def legal_assistant_chat(
             response = LawChatResponse(
                 answer=rag_response.answer,
                 sources=legal_sources,
-                total_chunks=total_chunks
+                total_chunks=total_chunks,
+                context_used="general"
             )
         else:
             # Direct LLM Mode: Use LLM with general legal system prompt (no RAG)
@@ -104,7 +147,8 @@ async def legal_assistant_chat(
             response = LawChatResponse(
                 answer=answer,
                 sources=[],  # No sources in direct LLM mode
-                total_chunks=0
+                total_chunks=0,
+                context_used="general"
             )
 
         logger.info(

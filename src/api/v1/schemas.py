@@ -258,26 +258,6 @@ class QuestionContext(BaseModel):
     language: Optional[str] = "english"
 
 
-class RagQuestionGenerationRequest(BaseModel):
-    questions: List[QuestionSpec]
-    context: Optional[QuestionContext] = None
-
-
-class GeneratedQuestion(BaseModel):
-    id: str
-    type: str
-    question: str
-    options: Optional[List[str]] = None
-    correct_answer: Optional[str] = None
-    explanation: Optional[str] = None
-    difficulty: str
-    metadata: Optional[Dict[str, Any]] = None
-
-
-class RagQuestionGenerationResponse(BaseModel):
-    questions: List[GeneratedQuestion]
-    total_generated: int
-    generation_time: Optional[float] = None
 
 
 LegalDifficultyLevel = str
@@ -286,6 +266,7 @@ LegalDifficultyLevel = str
 class LawChatRequest(BaseModel):
     question: str = Field(..., min_length=10, max_length=500, description="Legal question (10-500 chars)")
     enable_rag: bool = Field(default=True, description="If True, use RAG with all legal documents. If False, use direct LLM with legal system prompt")
+    news_context_id: Optional[int] = Field(default=None, description="Limit search to specific news article context")
 
 
 class LawSource(BaseModel):
@@ -297,6 +278,7 @@ class LawChatResponse(BaseModel):
     answer: str
     sources: List[LawSource]
     total_chunks: int
+    context_used: Optional[str] = Field(default=None, description="Context type used: 'news', 'general', or 'mixed'")
 
 
 class LegalQuestionSpec(BaseModel):
@@ -647,3 +629,42 @@ class ImportPaperResponse(BaseModel):
     questions_imported: int
     total_marks: float
     message: str
+
+
+# News Schemas
+class NewsArticleSummary(BaseModel):
+    id: int
+    title: str
+    url: str
+    source: str
+    category: str
+    published_at: Optional[datetime] = None
+    summary: Optional[str] = None
+    featured_image_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    image_caption: Optional[str] = None
+    image_alt_text: Optional[str] = None
+
+
+class NewsListResponse(BaseModel):
+    articles: List[NewsArticleSummary]
+    total: int
+    has_more: bool
+
+
+class NewsDetailResponse(BaseModel):
+    id: int
+    title: str
+    url: str
+    source: str
+    category: str
+    published_at: Optional[datetime] = None
+    full_content: str
+    summary: Optional[str] = None
+    keywords: List[str] = Field(default_factory=list)
+    related_articles: List[NewsArticleSummary] = Field(default_factory=list)
+    rag_document_id: Optional[str] = None
+    featured_image_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    image_caption: Optional[str] = None
+    image_alt_text: Optional[str] = None
