@@ -2,6 +2,7 @@ from typing import List, Dict, Any
 import httpx
 from .core_client import CoreRagClient
 from .base import RagQueryResponse, RagChunk, RagRetrieveResponse
+from ...exceptions import ParkhoError
 
 class LawRagClient(CoreRagClient):
     """Legal Assistant specialized RAG client for constitutional law queries."""

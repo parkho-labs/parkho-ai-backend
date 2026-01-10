@@ -197,3 +197,20 @@ class GCPService:
         except Exception as e:
             logger.error("Failed to upload file from path to GCS", error=str(e), blob_name=blob_name)
             return False
+
+    def upload_file_from_bytes(self, blob_name: str, file_bytes: bytes, content_type: str) -> Optional[str]:
+        """
+        Uploads file bytes to GCS and returns the public URL.
+        Used for downloading and storing images.
+        """
+        if not self.client:
+            return None
+        try:
+            bucket = self.client.bucket(self.bucket_name)
+            blob = bucket.blob(blob_name)
+            blob.upload_from_string(file_bytes, content_type=content_type)
+            logger.info("Uploaded file from bytes to GCS", blob_name=blob_name, size=len(file_bytes))
+            return self.get_public_url(blob_name)
+        except Exception as e:
+            logger.error("Failed to upload file from bytes to GCS", error=str(e), blob_name=blob_name)
+            return None

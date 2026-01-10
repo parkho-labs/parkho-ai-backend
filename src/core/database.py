@@ -39,6 +39,7 @@ def get_db() -> Generator[Session, None, None]:
 def create_tables():
     # Import models to register them with Base
     from ..models import uploaded_file, user, user_event, collection, exam_paper, user_attempt
+    from ..news.models import news_article
     Base.metadata.create_all(bind=engine)
 
 

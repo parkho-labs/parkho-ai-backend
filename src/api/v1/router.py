@@ -5,6 +5,8 @@ from .endpoints import auth, health, analytics, files, collection
 from .endpoints import law, questions, retrieve
 # PYQ endpoints
 from .endpoints import pyq
+# News endpoints
+from .endpoints import news
 
 api_router = APIRouter()
 
@@ -41,3 +43,10 @@ api_router.include_router(retrieve.router, prefix="/legal", tags=["legal-assista
 
 # PYQ System - Mounts at /pyq prefix (e.g. /pyq/papers, /pyq/attempts)
 api_router.include_router(pyq.router, prefix="/pyq", tags=["pyq"])
+
+# =============================================================================
+# NEWS API ROUTER
+# =============================================================================
+
+# News System - Mounts at /news prefix (e.g. /news/, /news/{id})
+api_router.include_router(news.router, prefix="/news", tags=["news"])
