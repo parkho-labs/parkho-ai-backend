@@ -3,6 +3,8 @@ from fastapi import APIRouter
 from .endpoints import auth, health, analytics, files, collection
 # Legal RAG Engine endpoints
 from .endpoints import law, questions, retrieve
+# Legal Agents endpoints (Ask Assistant)
+from .endpoints import agents
 # PYQ endpoints
 from .endpoints import pyq
 # News endpoints
@@ -36,6 +38,10 @@ api_router.include_router(files.router, prefix="/files", tags=["files"])
 api_router.include_router(law.router, prefix="/legal", tags=["legal-assistant"])
 api_router.include_router(questions.router, prefix="/legal", tags=["legal-assistant"])
 api_router.include_router(retrieve.router, prefix="/legal", tags=["legal-assistant"])
+
+# Legal Agents - AI Agent System with multiple personalities
+# Includes: SSE streaming chat, agent types, styles, models
+api_router.include_router(agents.router, prefix="/legal", tags=["legal-agents"])
 
 # =============================================================================
 # PYQ (Previous Year Questions) API ROUTER

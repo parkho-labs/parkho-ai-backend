@@ -13,7 +13,8 @@ from src.core.database import Base
 from src.config import get_settings
 
 # Import models to register them with Base
-from src.models import content_job, user, quiz_question, uploaded_file
+from src.models import user, uploaded_file, user_event, exam_paper, user_attempt, collection
+from src.news.models import news_article
 
 config = context.config
 settings = get_settings()

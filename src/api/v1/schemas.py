@@ -264,8 +264,8 @@ LegalDifficultyLevel = str
 
 
 class LawChatRequest(BaseModel):
-    question: str = Field(..., min_length=10, max_length=500, description="Legal question (10-500 chars)")
-    enable_rag: bool = Field(default=True, description="If True, use RAG with all legal documents. If False, use direct LLM with legal system prompt")
+    question: str = Field(..., max_length=2000, description="Legal question")
+    enable_rag: bool = Field(default=False, description="If True, use RAG with all legal documents. If False, use direct LLM with legal system prompt")
     news_context_id: Optional[int] = Field(default=None, description="Limit search to specific news article context")
 
 

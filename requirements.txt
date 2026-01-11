@@ -11,6 +11,7 @@ alembic>=1.12.0
 openai>=1.0.0
 anthropic>=0.7.0
 google-generativeai>=0.3.0
+pydantic-ai>=0.0.14
 
 # PDF Parsing (for PYQ system)
 pymupdf>=1.23.0
