@@ -8,6 +8,7 @@ from ..models.enums import AgentType, ResponseStyle, LLMModel
 from ..prompts.agent_prompts import get_agent_prompt
 from ..prompts.style_prompts import get_style_prompt, OUTPUT_FORMAT
 from ..schemas.responses import StreamChunk, ChunkType
+from src.services.llm_service import LLMProvider
 
 logger = structlog.get_logger(__name__)
 
@@ -90,6 +91,8 @@ Before answering, briefly explain your reasoning process in 1-2 sentences. Start
         Yields:
             StreamChunk objects for SSE
         """
+        from src.services.llm_service import LLMError
+        
         try:
             # Yield thinking start
             yield StreamChunk(
@@ -97,14 +100,51 @@ Before answering, briefly explain your reasoning process in 1-2 sentences. Start
                 content="Analyzing your question..."
             )
             
-            # Generate response using LLM service
-            full_response = await llm_service.generate_with_fallback(
+            # Generate response using LLM service with metadata
+            # Convert string provider to LLMProvider enum
+            provider_str = LLMModel.get_provider(model)
+            provider_enum = LLMProvider(provider_str) if provider_str else None
+            
+            result = await llm_service.generate_with_metadata(
                 system_prompt=system_prompt,
                 user_prompt=question,
                 temperature=0.3,
                 max_tokens=2000,
-                preferred_provider=LLMModel.get_provider(model)
+                preferred_provider=provider_enum
             )
+            
+            full_response = result["response"]
+            
+            # Check if fallback occurred and notify frontend
+            if result.get("fallback_occurred"):
+                requested = result.get("requested_provider", "requested model")
+                used = result.get("provider_used", "alternative")
+                model_used = result.get("model_used", "")
+                
+                # Build warning message
+                warning_msg = f"Note: {requested.title()} model unavailable. Using {used.title()} ({model_used}) instead."
+                
+                # Include error details if available
+                if result.get("errors"):
+                    first_error = result["errors"][0]
+                    error_type = first_error.get("error_type", "")
+                    if error_type == "model_not_found":
+                        warning_msg = f"The requested model is not available. Switched to {model_used}."
+                    elif error_type == "rate_limit":
+                        warning_msg = f"Rate limit reached on primary model. Using {model_used}."
+                    elif error_type == "quota_exceeded":
+                        warning_msg = f"Quota exceeded on primary model. Using {model_used}."
+                
+                yield StreamChunk(
+                    type=ChunkType.WARNING,
+                    content=warning_msg,
+                    metadata={
+                        "requested_provider": result.get("requested_provider"),
+                        "actual_provider": result.get("provider_used"),
+                        "model_used": result.get("model_used"),
+                        "errors": result.get("errors", [])
+                    }
+                )
             
             # Parse thinking vs answer from response
             thinking, answer = self._parse_response(full_response)
@@ -126,11 +166,37 @@ Before answering, briefly explain your reasoning process in 1-2 sentences. Start
                         content=paragraph + "\n\n"
                     )
             
-        except Exception as e:
-            self.logger.error("Agent generation failed", error=str(e))
+        except LLMError as e:
+            self.logger.error("All LLM providers failed", error=str(e), errors=e.errors)
+            error_msg = e.get_user_friendly_message()
             yield StreamChunk(
                 type=ChunkType.ERROR,
-                content=f"An error occurred: {str(e)}"
+                content=error_msg,
+                metadata={
+                    "error_details": e.errors,
+                    "recoverable": False
+                }
+            )
+        except Exception as e:
+            self.logger.error("Agent generation failed", error=str(e))
+            # Provide user-friendly error message
+            error_str = str(e)
+            if "api key" in error_str.lower() or "authentication" in error_str.lower():
+                user_msg = "AI service configuration issue. Please contact support."
+            elif "timeout" in error_str.lower():
+                user_msg = "Request timed out. Please try again."
+            elif "rate limit" in error_str.lower():
+                user_msg = "Too many requests. Please wait a moment and try again."
+            else:
+                user_msg = "An unexpected error occurred. Please try again."
+            
+            yield StreamChunk(
+                type=ChunkType.ERROR,
+                content=user_msg,
+                metadata={
+                    "technical_error": error_str,
+                    "recoverable": True
+                }
             )
     
     def _parse_response(self, response: str) -> tuple[str, str]:

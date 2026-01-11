@@ -12,6 +12,7 @@ class ChunkType(str, Enum):
     THINKING = "thinking"    # Chain of thought reasoning
     ANSWER = "answer"        # Main answer content
     SOURCE = "source"        # Source/citation information
+    WARNING = "warning"      # Warning message (e.g., model fallback)
     ERROR = "error"          # Error message
     DONE = "done"            # Stream completion marker
 

@@ -22,7 +22,7 @@ def initialize_firebase():
                 cred = credentials.Certificate(settings.firebase_service_account_path)
             else:
                 # Try Secret Manager (Production fallback)
-                secret_name = os.getenv('FIREBASE_SECRET_NAME', 'firebase-service-account')
+                secret_name = os.getenv('FIREBASE_SECRET_NAME', 'firebase-service-account-key')
                 try:
                     from google.cloud import secretmanager
                     client = secretmanager.SecretManagerServiceClient()
