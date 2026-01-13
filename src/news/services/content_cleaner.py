@@ -5,7 +5,6 @@ Handles HTML removal, text formatting, and content standardization
 
 import re
 import html
-from typing import Optional
 from bs4 import BeautifulSoup
 import logging
 
