@@ -34,170 +34,258 @@ class BaseAgent(ABC):
         self,
         style: ResponseStyle,
         memory_context: Optional[str] = None,
-        rag_context: Optional[str] = None
+        rag_context: Optional[str] = None,
+        file_context: Optional[str] = None
     ) -> str:
         """
         Build the complete system prompt with all components.
-        
+
         Args:
             style: Response style to apply
             memory_context: Previous conversation context from memory
             rag_context: Relevant information from knowledge base
-        
+            file_context: Content from uploaded files for analysis
+
         Returns:
             Complete system prompt
         """
-        parts = [self.system_prompt]
-        
-        # Add style instructions
-        style_prompt = get_style_prompt(style)
-        parts.append(style_prompt)
-        
-        # Add output format
-        parts.append(OUTPUT_FORMAT)
-        
-        # Add memory context if available
-        if memory_context:
-            parts.append(memory_context)
-        
-        # Add RAG context if available
-        if rag_context:
-            parts.append(rag_context)
-        
+        return self._assemble_prompt_components(
+            style, memory_context, rag_context, file_context
+        )
+
+    def _assemble_prompt_components(
+        self,
+        style: ResponseStyle,
+        memory_context: Optional[str],
+        rag_context: Optional[str],
+        file_context: Optional[str]
+    ) -> str:
+        """Assemble all prompt components in the correct order"""
+        parts = [
+            self.system_prompt,
+            get_style_prompt(style),
+            OUTPUT_FORMAT
+        ]
+
+        # Add context sections
+        parts.extend(self._get_context_sections(memory_context, rag_context, file_context))
+
         # Add chain of thought instruction
-        parts.append("""
-## Chain of Thought
-Before answering, briefly explain your reasoning process in 1-2 sentences. Start with "Let me analyze this..." or similar, then provide your answer.
-""")
-        
+        parts.append(self._get_chain_of_thought_instruction())
+
         return "\n\n".join(parts)
+
+    def _get_context_sections(
+        self,
+        memory_context: Optional[str],
+        rag_context: Optional[str],
+        file_context: Optional[str]
+    ) -> list[str]:
+        """Get all non-empty context sections"""
+        contexts = []
+
+        if memory_context:
+            contexts.append(memory_context)
+
+        if rag_context:
+            contexts.append(rag_context)
+
+        if file_context:
+            contexts.append(file_context)
+
+        return contexts
+
+    def _get_chain_of_thought_instruction(self) -> str:
+        """Get the chain of thought instruction"""
+        return """## Chain of Thought
+Before answering, briefly explain your reasoning process in 1-2 sentences. Start with "Let me analyze this..." or similar, then provide your answer."""
     
     async def generate_stream(
         self,
         question: str,
         system_prompt: str,
         model: LLMModel,
-        llm_service: Any  # LLMService instance
+        llm_service: Any,  # LLMService instance
+        temperature: Optional[float] = 0.7,
+        max_tokens: Optional[int] = 2048
     ) -> AsyncGenerator[StreamChunk, None]:
         """
         Generate streaming response with chain of thought.
-        
+
         Args:
             question: User's question
             system_prompt: Complete system prompt
             model: LLM model to use
             llm_service: LLM service instance
-        
+            temperature: LLM temperature (0.0-2.0, default 0.7)
+            max_tokens: Maximum tokens for response (default 2048)
+
         Yields:
             StreamChunk objects for SSE
         """
         from src.services.llm_service import LLMError
-        
+
         try:
-            # Yield thinking start
             yield StreamChunk(
                 type=ChunkType.THINKING,
                 content="Analyzing your question..."
             )
-            
-            # Generate response using LLM service with metadata
-            # Convert string provider to LLMProvider enum
-            provider_str = LLMModel.get_provider(model)
-            provider_enum = LLMProvider(provider_str) if provider_str else None
-            
-            result = await llm_service.generate_with_metadata(
-                system_prompt=system_prompt,
-                user_prompt=question,
-                temperature=0.3,
-                max_tokens=2000,
-                preferred_provider=provider_enum
+
+            # Generate LLM response
+            result = await self._generate_llm_response(
+                question, system_prompt, model, llm_service, temperature, max_tokens
             )
-            
-            full_response = result["response"]
-            
-            # Check if fallback occurred and notify frontend
-            if result.get("fallback_occurred"):
-                requested = result.get("requested_provider", "requested model")
-                used = result.get("provider_used", "alternative")
-                model_used = result.get("model_used", "")
-                
-                # Build warning message
-                warning_msg = f"Note: {requested.title()} model unavailable. Using {used.title()} ({model_used}) instead."
-                
-                # Include error details if available
-                if result.get("errors"):
-                    first_error = result["errors"][0]
-                    error_type = first_error.get("error_type", "")
-                    if error_type == "model_not_found":
-                        warning_msg = f"The requested model is not available. Switched to {model_used}."
-                    elif error_type == "rate_limit":
-                        warning_msg = f"Rate limit reached on primary model. Using {model_used}."
-                    elif error_type == "quota_exceeded":
-                        warning_msg = f"Quota exceeded on primary model. Using {model_used}."
-                
-                yield StreamChunk(
-                    type=ChunkType.WARNING,
-                    content=warning_msg,
-                    metadata={
-                        "requested_provider": result.get("requested_provider"),
-                        "actual_provider": result.get("provider_used"),
-                        "model_used": result.get("model_used"),
-                        "errors": result.get("errors", [])
-                    }
-                )
-            
-            # Parse thinking vs answer from response
-            thinking, answer = self._parse_response(full_response)
-            
-            # Yield thinking if present
-            if thinking:
-                yield StreamChunk(
-                    type=ChunkType.THINKING,
-                    content=thinking
-                )
-            
-            # Yield answer in chunks for streaming effect
-            # Split by paragraphs for natural chunking
-            paragraphs = answer.split("\n\n")
-            for paragraph in paragraphs:
-                if paragraph.strip():
-                    yield StreamChunk(
-                        type=ChunkType.ANSWER,
-                        content=paragraph + "\n\n"
-                    )
-            
+
+            # Handle fallback warnings
+            async for warning_chunk in self._handle_fallback_warnings(result):
+                yield warning_chunk
+
+            # Process and stream the response
+            async for response_chunk in self._stream_response_content(result["response"]):
+                yield response_chunk
+
         except LLMError as e:
-            self.logger.error("All LLM providers failed", error=str(e), errors=e.errors)
-            error_msg = e.get_user_friendly_message()
-            yield StreamChunk(
-                type=ChunkType.ERROR,
-                content=error_msg,
-                metadata={
-                    "error_details": e.errors,
-                    "recoverable": False
-                }
-            )
+            async for error_chunk in self._handle_llm_error(e):
+                yield error_chunk
         except Exception as e:
-            self.logger.error("Agent generation failed", error=str(e))
-            # Provide user-friendly error message
-            error_str = str(e)
-            if "api key" in error_str.lower() or "authentication" in error_str.lower():
-                user_msg = "AI service configuration issue. Please contact support."
-            elif "timeout" in error_str.lower():
-                user_msg = "Request timed out. Please try again."
-            elif "rate limit" in error_str.lower():
-                user_msg = "Too many requests. Please wait a moment and try again."
-            else:
-                user_msg = "An unexpected error occurred. Please try again."
-            
+            async for error_chunk in self._handle_general_error(e):
+                yield error_chunk
+
+    async def _generate_llm_response(
+        self,
+        question: str,
+        system_prompt: str,
+        model: LLMModel,
+        llm_service: Any,
+        temperature: float,
+        max_tokens: int
+    ) -> Dict[str, Any]:
+        """Generate response from LLM service"""
+        # Convert string provider to LLMProvider enum
+        provider_str = LLMModel.get_provider(model)
+        provider_enum = LLMProvider(provider_str) if provider_str else None
+
+        return await llm_service.generate_with_metadata(
+            system_prompt=system_prompt,
+            user_prompt=question,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            preferred_provider=provider_enum
+        )
+
+    async def _handle_fallback_warnings(self, result: Dict[str, Any]) -> AsyncGenerator[StreamChunk, None]:
+        """Handle and yield fallback warnings if LLM provider switched"""
+        if not result.get("fallback_occurred"):
+            return
+
+        requested = result.get("requested_provider", "requested model")
+        used = result.get("provider_used", "alternative")
+        model_used = result.get("model_used", "")
+
+        # Build warning message based on error type
+        warning_msg = self._build_fallback_warning_message(
+            result.get("errors", []), requested, used, model_used
+        )
+
+        yield StreamChunk(
+            type=ChunkType.WARNING,
+            content=warning_msg,
+            metadata={
+                "requested_provider": result.get("requested_provider"),
+                "actual_provider": result.get("provider_used"),
+                "model_used": result.get("model_used"),
+                "errors": result.get("errors", [])
+            }
+        )
+
+    def _build_fallback_warning_message(
+        self,
+        errors: list,
+        requested: str,
+        used: str,
+        model_used: str
+    ) -> str:
+        """Build appropriate warning message based on error type"""
+        if not errors:
+            return f"Note: {requested.title()} model unavailable. Using {used.title()} ({model_used}) instead."
+
+        error_type = errors[0].get("error_type", "")
+        if error_type == "model_not_found":
+            return f"The requested model is not available. Switched to {model_used}."
+        elif error_type == "rate_limit":
+            return f"Rate limit reached on primary model. Using {model_used}."
+        elif error_type == "quota_exceeded":
+            return f"Quota exceeded on primary model. Using {model_used}."
+        else:
+            return f"Note: {requested.title()} model unavailable. Using {used.title()} ({model_used}) instead."
+
+    async def _stream_response_content(self, response: str) -> AsyncGenerator[StreamChunk, None]:
+        """Parse and stream response content"""
+        # Parse thinking vs answer from response
+        thinking, answer = self._parse_response(response)
+
+        # Yield thinking if present
+        if thinking:
             yield StreamChunk(
-                type=ChunkType.ERROR,
-                content=user_msg,
-                metadata={
-                    "technical_error": error_str,
-                    "recoverable": True
-                }
+                type=ChunkType.THINKING,
+                content=thinking
             )
+
+        # Stream answer in natural chunks
+        async for answer_chunk in self._stream_answer_paragraphs(answer):
+            yield answer_chunk
+
+    async def _stream_answer_paragraphs(self, answer: str) -> AsyncGenerator[StreamChunk, None]:
+        """Stream answer content in paragraph chunks"""
+        paragraphs = answer.split("\n\n")
+        for paragraph in paragraphs:
+            if paragraph.strip():
+                yield StreamChunk(
+                    type=ChunkType.ANSWER,
+                    content=paragraph + "\n\n"
+                )
+
+    async def _handle_llm_error(self, error) -> AsyncGenerator[StreamChunk, None]:
+        """Handle LLM service errors"""
+        self.logger.error("All LLM providers failed", error=str(error), errors=error.errors)
+        error_msg = error.get_user_friendly_message()
+        yield StreamChunk(
+            type=ChunkType.ERROR,
+            content=error_msg,
+            metadata={
+                "error_details": error.errors,
+                "recoverable": False
+            }
+        )
+
+    async def _handle_general_error(self, error: Exception) -> AsyncGenerator[StreamChunk, None]:
+        """Handle general errors with user-friendly messages"""
+        self.logger.error("Agent generation failed", error=str(error))
+
+        # Provide user-friendly error message
+        user_msg = self._get_user_friendly_error_message(str(error))
+
+        yield StreamChunk(
+            type=ChunkType.ERROR,
+            content=user_msg,
+            metadata={
+                "technical_error": str(error),
+                "recoverable": True
+            }
+        )
+
+    def _get_user_friendly_error_message(self, error_str: str) -> str:
+        """Convert technical errors to user-friendly messages"""
+        error_lower = error_str.lower()
+
+        if "api key" in error_lower or "authentication" in error_lower:
+            return "AI service configuration issue. Please contact support."
+        elif "timeout" in error_lower:
+            return "Request timed out. Please try again."
+        elif "rate limit" in error_lower:
+            return "Too many requests. Please wait a moment and try again."
+        else:
+            return "An unexpected error occurred. Please try again."
     
     def _parse_response(self, response: str) -> tuple[str, str]:
         """

@@ -9,6 +9,7 @@ class RAGIndexingStatus(str, Enum):
     INDEXING_SUCCESS = "INDEXING_SUCCESS"
     INDEXING_FAILED = "INDEXING_FAILED"
     INDEXING_PENDING = "INDEXING_PENDING"
+    AGENT_PROCESSING = "AGENT_PROCESSING"
 
 class RAGContentType(str, Enum):
     FILE = "file"

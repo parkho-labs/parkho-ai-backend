@@ -1,6 +1,6 @@
 """Request schemas for Ask Assistant API"""
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
 from ..models.enums import AgentType, ResponseStyle, LLMModel
@@ -31,11 +31,27 @@ class AgentChatRequest(BaseModel):
     )
     collection_ids: Optional[List[str]] = Field(
         default=None,
-        description="Specific collections to query (None = all)"
+        description="User's specific collections to include (null = only system collections, [] = only system collections, [ids] = system + user collections)"
     )
     conversation_id: Optional[str] = Field(
         default=None,
         description="Existing conversation ID to continue"
+    )
+    temperature: Optional[float] = Field(
+        default=0.7,
+        ge=0.0,
+        le=2.0,
+        description="LLM temperature for response randomness (0.0-2.0)"
+    )
+    max_tokens: Optional[int] = Field(
+        default=2048,
+        ge=1,
+        le=4096,
+        description="Maximum tokens for LLM response (1-4096)"
+    )
+    file_contents: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Extracted file contents for analysis. Each item should have 'filename', 'content', and 'type' fields."
     )
     
     class Config:
@@ -48,6 +64,15 @@ class AgentChatRequest(BaseModel):
                 "memory_enabled": True,
                 "knowledge_base_enabled": True,
                 "collection_ids": None,
-                "conversation_id": None
+                "conversation_id": None,
+                "temperature": 0.7,
+                "max_tokens": 2048,
+                "file_contents": [
+                    {
+                        "filename": "document.pdf",
+                        "content": "This is the extracted text content from the PDF...",
+                        "type": "pdf"
+                    }
+                ]
             }
         }

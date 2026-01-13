@@ -51,8 +51,11 @@ async def ask_agent_stream(
         - model: gemini-2.0-flash, gemini-1.5-pro, gpt-4o-mini, gpt-4o
         - memory_enabled: Save conversation history (default: true)
         - knowledge_base_enabled: Query legal documents (default: true)
-        - collection_ids: Specific collections to query (null = all)
+        - collection_ids: User collections to add to system collections (null/[] = only system collections)
         - conversation_id: Continue existing conversation
+        - temperature: LLM temperature 0.0-2.0 (default: 0.7)
+        - max_tokens: Maximum response tokens 1-4096 (default: 2048)
+        - file_contents: Extracted file contents for analysis
     
     **Response:**
         Server-Sent Events stream with chunks:
@@ -82,7 +85,10 @@ async def ask_agent_stream(
             memory_enabled=request.memory_enabled,
             knowledge_base_enabled=request.knowledge_base_enabled,
             collection_ids=request.collection_ids,
-            conversation_id=request.conversation_id
+            conversation_id=request.conversation_id,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            file_contents=request.file_contents
         ):
             yield chunk.to_sse()
     
@@ -125,7 +131,10 @@ async def ask_agent_sync(
         memory_enabled=request.memory_enabled,
         knowledge_base_enabled=request.knowledge_base_enabled,
         collection_ids=request.collection_ids,
-        conversation_id=request.conversation_id
+        conversation_id=request.conversation_id,
+        temperature=request.temperature,
+        max_tokens=request.max_tokens,
+        file_contents=request.file_contents
     )
     
     return AgentChatResponse(
