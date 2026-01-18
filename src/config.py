@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = Field(default=None, description="Anthropic API key")
     google_api_key: Optional[str] = Field(default=None, description="Google API key for Gemini and Speech-to-Text")
 
+    # Mem0 Memory Configuration
+    mem0_api_key: Optional[str] = Field(default=None, description="Mem0 Platform API key")
+    mem0_enabled: bool = Field(default=True, description="Enable/disable Mem0 memory tracking")
+    mem0_fallback_to_local: bool = Field(default=True, description="Fallback to local Memory if API fails")
+
     firebase_service_account_path: str = Field(default="nyayamind-dev-firebase-adminsdk-fbsvc-db8b836225.json", description="Firebase service account JSON file path")
     firebase_project_id: str = Field(default="nyayamind-dev", description="Firebase project ID")
     firebase_web_client_id: str = Field(default="722723826302:web:your-web-app-id", description="Firebase web client ID")

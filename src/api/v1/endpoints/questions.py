@@ -29,6 +29,8 @@ from src.api.v1.schemas import (
 from src.core.database import get_db
 from src.api.dependencies import get_llm_service
 from src.services.llm_service import LLMService
+from src.ask_assistant.services.memory_service import get_memory_service
+from src.ask_assistant.models.enums import MemoryType
 import asyncio
 
 logger = structlog.get_logger(__name__)
@@ -178,6 +180,30 @@ async def generate_legal_questions(
             generation_time=generation_time,
             attempt_id=response.attempt_id
         )
+
+        # Store quiz generation interaction in memory
+        try:
+            memory_service = get_memory_service()
+            memory_content = f"User generated a legal quiz with {response.total_generated} questions\n\nQuestion types: {', '.join(f'{k}: {v}' for k, v in type_counts.items())}\nDifficulty levels: {', '.join(f'{k}: {v}' for k, v in difficulty_counts.items())}"
+            memory_metadata = {
+                "total_generated": response.total_generated,
+                "total_requested": total_requested,
+                "type_counts": type_counts,
+                "difficulty_counts": difficulty_counts,
+                "generation_time": generation_time,
+                "attempt_id": response.attempt_id,
+                "quiz_type": "legal"
+            }
+
+            memory_service.add_interaction_memory(
+                user_id=user_id,
+                interaction_type=MemoryType.QUIZ_GENERATION,
+                content=memory_content,
+                metadata=memory_metadata
+            )
+        except Exception as e:
+            # Don't fail the request if memory storage fails
+            logger.warning("Failed to store memory for quiz generation", error=str(e), user_id=user_id)
 
         return response
 
@@ -375,6 +401,33 @@ async def generate_custom_quiz(
             attempt_id=response.attempt_id
         )
 
+        # Store custom quiz generation interaction in memory
+        try:
+            memory_service = get_memory_service()
+            memory_content = f"User generated a custom quiz with {response.total_generated} questions\n\nSubject: {request.subject}\nDifficulty: {request.difficulty}\nQuestion types: {', '.join(f'{k}: {v}' for k, v in type_counts.items())}"
+            memory_metadata = {
+                "total_generated": response.total_generated,
+                "total_requested": total_requested,
+                "type_counts": type_counts,
+                "difficulty_counts": difficulty_counts,
+                "generation_time": generation_time,
+                "attempt_id": response.attempt_id,
+                "quiz_type": "custom",
+                "subject": request.subject,
+                "difficulty": request.difficulty,
+                "scope": request.scope
+            }
+
+            memory_service.add_interaction_memory(
+                user_id=user_id,
+                interaction_type=MemoryType.QUIZ_GENERATION,
+                content=memory_content,
+                metadata=memory_metadata
+            )
+        except Exception as e:
+            # Don't fail the request if memory storage fails
+            logger.warning("Failed to store memory for custom quiz generation", error=str(e), user_id=user_id)
+
         return response
 
     except HTTPException:
@@ -564,6 +617,35 @@ async def generate_mock_quiz(
             attempt_id=response.attempt_id,
             distribution_effectiveness=distribution_effectiveness
         )
+
+        # Store mock quiz generation interaction in memory
+        try:
+            memory_service = get_memory_service()
+            memory_content = f"User generated a mock quiz with {response.total_generated} questions\n\nSubject: {request.subject}\nQuestion types: {', '.join(f'{k}: {v}' for k, v in actual_type_counts.items())}\nDistribution effectiveness: {', '.join(f'{k}: {v}%' for k, v in distribution_effectiveness.items())}"
+            memory_metadata = {
+                "total_generated": response.total_generated,
+                "total_requested": total_requested,
+                "type_counts": actual_type_counts,
+                "difficulty_counts": actual_difficulty_counts,
+                "generation_time": generation_time,
+                "attempt_id": response.attempt_id,
+                "quiz_type": "mock",
+                "subject": request.subject,
+                "scope": request.scope,
+                "distribution_effectiveness": distribution_effectiveness,
+                "questions_per_type_target": questions_per_type
+            }
+
+            memory_service.add_interaction_memory(
+                user_id=user_id,
+                interaction_type=MemoryType.QUIZ_GENERATION,
+                content=memory_content,
+                metadata=memory_metadata
+            )
+        except Exception as e:
+            # Don't fail the request if memory storage fails
+            logger.warning("Failed to store memory for mock quiz generation", error=str(e), user_id=user_id)
+
         return response
 
     except HTTPException:

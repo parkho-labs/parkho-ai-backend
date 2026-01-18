@@ -21,6 +21,8 @@ from src.core.database import get_db
 from src.news.models.news_article import NewsArticle
 from src.services.news_rag_service import create_news_rag_service
 from src.services.intent_classifier import get_intent_classifier
+from src.ask_assistant.services.memory_service import get_memory_service
+from src.ask_assistant.models.enums import MemoryType
 from sqlalchemy.orm import Session
 
 logger = structlog.get_logger(__name__)
@@ -169,6 +171,30 @@ async def legal_assistant_chat(
             total_chunks=response.total_chunks,
             mode="RAG" if request.enable_rag else "Direct LLM"
         )
+
+        # Store interaction in memory
+        try:
+            memory_service = get_memory_service()
+            memory_content = f"User asked: {request.question}\n\nAnswer: {response.answer}"
+            memory_metadata = {
+                "enable_rag": request.enable_rag,
+                "sources_count": len(response.sources),
+                "total_chunks": response.total_chunks,
+                "context_used": response.context_used,
+                "mode": "RAG" if request.enable_rag else "Direct LLM"
+            }
+            if request.news_context_id:
+                memory_metadata["news_context_id"] = request.news_context_id
+
+            memory_service.add_interaction_memory(
+                user_id=user_id,
+                interaction_type=MemoryType.GENERAL_CHAT,
+                content=memory_content,
+                metadata=memory_metadata
+            )
+        except Exception as e:
+            # Don't fail the request if memory storage fails
+            logger.warning("Failed to store memory for legal chat", error=str(e), user_id=user_id)
 
         return response
 
