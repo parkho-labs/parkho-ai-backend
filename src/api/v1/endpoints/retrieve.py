@@ -12,6 +12,8 @@ from typing import List
 from src.api.dependencies import get_legal_user_id_required, get_law_rag_client
 from src.services.rag import LawRagClient
 from src.api.v1.schemas import LegalRetrieveRequest, LegalRetrieveResponse, LegalChunk
+from src.ask_assistant.services.memory_service import get_memory_service
+from src.ask_assistant.models.enums import MemoryType
 
 logger = structlog.get_logger(__name__)
 
@@ -97,6 +99,33 @@ async def retrieve_constitutional_content(
             results_count=len(legal_chunks),
             avg_relevance=sum(c.relevance_score for c in legal_chunks) / len(legal_chunks) if legal_chunks else 0
         )
+
+        # Store search interaction in memory
+        try:
+            memory_service = get_memory_service()
+            # Format search results summary for memory
+            results_summary = f"Found {len(legal_chunks)} results"
+            if legal_chunks:
+                top_scores = [c.relevance_score for c in legal_chunks[:3]]
+                results_summary += f" (top scores: {', '.join(f'{s:.2f}' for s in top_scores)})"
+
+            memory_content = f"User searched: {request.query}\n\n{results_summary}"
+            memory_metadata = {
+                "results_count": len(legal_chunks),
+                "collection_ids": request.collection_ids,
+                "top_k": request.top_k,
+                "avg_relevance": sum(c.relevance_score for c in legal_chunks) / len(legal_chunks) if legal_chunks else 0
+            }
+
+            memory_service.add_interaction_memory(
+                user_id=request.user_id,
+                interaction_type=MemoryType.SEARCH,
+                content=memory_content,
+                metadata=memory_metadata
+            )
+        except Exception as e:
+            # Don't fail the request if memory storage fails
+            logger.warning("Failed to store memory for search", error=str(e), user_id=request.user_id)
 
         return response
 

@@ -504,8 +504,17 @@ class AgentManager:
         sources: List[SourceInfo]
     ) -> None:
         """Save conversation to memory and history"""
-        # Save to memory service
+        # Save to memory service with enhanced metadata
         if memory_enabled and full_answer:
+            from datetime import datetime
+
+            # Create thinking summary (first 200 chars if exists)
+            thinking_summary = None
+            if thinking and thinking.strip():
+                thinking_summary = thinking.strip()[:200]
+                if len(thinking.strip()) > 200:
+                    thinking_summary += "..."
+
             self.memory_service.add_conversation(
                 user_id=user_id,
                 question=question,
@@ -514,7 +523,11 @@ class AgentManager:
                 metadata={
                     "style": style.value,
                     "model": model.value,
-                    "conversation_id": conversation.id
+                    "conversation_id": conversation.id,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "source_count": len(sources),
+                    "thinking_summary": thinking_summary,
+                    "has_thinking": bool(thinking and thinking.strip())
                 }
             )
 

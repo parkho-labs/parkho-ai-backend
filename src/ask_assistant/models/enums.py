@@ -24,7 +24,7 @@ class LLMModel(str, Enum):
     GEMINI_PRO = "gemini-1.5-pro"
     GPT4O_MINI = "gpt-4o-mini"
     GPT4O = "gpt-4o"
-    
+
     @classmethod
     def get_provider(cls, model: "LLMModel") -> str:
         """Get the provider for a model"""
@@ -33,3 +33,13 @@ class LLMModel(str, Enum):
         elif model in [cls.GPT4O_MINI, cls.GPT4O]:
             return "openai"
         return "google"  # default
+
+
+class MemoryType(str, Enum):
+    """Types of user interactions tracked in memory"""
+    AGENT_CHAT = "agent_chat"              # Agent conversations (already tracked)
+    GENERAL_CHAT = "general_chat"          # /ask-question endpoint
+    SEARCH = "search"                       # /search-content endpoint
+    QUIZ_GENERATION = "quiz_generation"     # Quiz creation
+    FILE_UPLOAD = "file_upload"            # File analysis
+    NEWS_INTERACTION = "news_interaction"  # News-related queries
